@@ -1,0 +1,19 @@
+name: Check companion
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix bridge-kit
+      - run: npm run check
+      - run: npm test
+      - run: npm run test:bridge
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File test/windows-install-smoke.ps1
+      - run: npx playwright install chromium
+      - run: npm run test:browser

@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "date": "2026-11-18",
+  "automated": {
+    "backendTests": 61,
+    "bridgeTests": 35,
+    "browserCases": 7,
+    "windowsInstallerCases": 2,
+    "jsSyntaxModules": 23
+  },
+  "mobile": {
+    "platform": "Android Emulator, Google APIs API 35 x86_64",
+    "actualApkVersion": "0.2.0",
+    "pinnedTlsPaired": true,
+    "sourceContent": "synthetic reading app, real Android sharesheet and content URI permission",
+    "sharedImage": {
+      "count": 1,
+      "width": 480,
+      "height": 320,
+      "sha256": "701ab7e7121277f5351e1e4fb497cbe7371cd62d6803457cd551fa978d658775"
+    },
+    "offlineRecord": {
+      "beforeReconnect": 0,
+      "afterReconnect": 1
+    },
+    "processDraftRecord": {
+      "count": 1
+    },
+    "physicalPhoneVerified": false
+  },
+  "artifact": {
+    "bytes": 904,
+    "sha256": "23f2b0519849a0620738325b3d99b16f82d92c7d9dc7036242c0c4db7faf0624",
+    "phoneImageTextCorrect": true,
+    "browserPreview": true
+  },
+  "retirement": {
+    "sameTaskPreserved": true,
+    "ownerReturnedToSecretary": true,
+    "retiredRoleStatus": "retired",
+    "artifactsPreserved": 1,
+    "roleMemoryMerged": 1,
+    "duplicateMemoryDisabled": true,
+    "completionAndReopenThroughRealBrowser": true,
+    "platformAppWasBound": false
+  },
+  "feishu": {
+    "existingBotWebSocket": true,
+    "nativeCardSendAccepted": true,
+    "configurationAttemptCode": 99991672,
+    "nativeClickCallbackVerified": false,
+    "nativeMenuVerified": false,
+    "independentBotCreatedVerified": false,
+    "platformDisableVerified": false
+  }
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>伴随 · 私人助手</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/v2.css"><script type="module" src="/app.js"></script></head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#home"><span class="brand-mark">伴</span><span>伴随<small>你的私人助手</small></span></a>
+      <nav aria-label="主要页面">
+        <a href="#home" data-nav="home"><span aria-hidden="true">▦</span>任务看板</a>
+        <a href="#tasks" data-nav="tasks"><span aria-hidden="true">☷</span>任务列表</a>
+        <a href="#chats" data-nav="chats"><span aria-hidden="true">◫</span>对话</a>
+        <a href="#more" data-nav="more"><span aria-hidden="true">···</span>更多</a>
+        <a href="#partners" data-nav="partners"><span aria-hidden="true">◈</span>助理们</a>
+        <a href="#materials" data-nav="materials"><span aria-hidden="true">▱</span>资料</a>
+      </nav>
+      <div id="role-nav"></div>
+      <div class="sidebar-foot"><div id="connection"><span class="dot"></span>正在连接</div><p>在自己的设备，接着做事。</p><span class="version">MVP 0.2</span></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><span id="page-label">助手</span><div class="actions"><button class="quiet" data-action="capture">＋ 记一下</button><button class="quiet" data-action="connect">连接手机</button></div></header>
+      <main id="main" tabindex="-1"><div class="loading">正在接回你的事情……</div></main>
+    </div>
+  </div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="dialog"><div id="dialog-body"></div></dialog>
+  <noscript>请启用浏览器脚本后使用本机工作台。</noscript>
+</body></html>

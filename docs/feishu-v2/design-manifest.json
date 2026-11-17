@@ -1,0 +1,80 @@
+{
+  "version": "2026-11-18",
+  "status": "design-proposal-not-installed",
+  "imageGeneration": "built-in image_gen",
+  "feishuRealWrites": 0,
+  "files": [
+    {
+      "file": "01-recruit-and-handoff.png",
+      "bytes": 1522299,
+      "sha256": "2313490bc8610172ae8df82ce2c4f34e4f27d66a15f6b995d61ac369e52dc9d6",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "file": "02-progress-and-delivery.png",
+      "bytes": 1540678,
+      "sha256": "d2eca50ed3d01cbc3d4ca6ed94bd6416c66210a3e317aa01c18f9c1f780e0a8f",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "file": "03-task-list-and-capture.png",
+      "bytes": 1441852,
+      "sha256": "5388d7c101394e5ae8a1dd2c933680598cc7c3073f3581988755b1f9a21f94a9",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "file": "04-retire-and-merge.png",
+      "bytes": 1435379,
+      "sha256": "71298c00a87f40425411d43194b2b8bceaba6f52c1e13ff632aab8447d76b432",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "file": "index.html",
+      "bytes": 45011,
+      "sha256": "a0d9a1ad3ed968c78eec196ebe4112b37e3d696497072262af5e153c3b74010b"
+    },
+    {
+      "file": "prompts.json",
+      "bytes": 15183,
+      "sha256": "4e29983bb3e35c05ac9e9a6d569e1adc9199c912ec0b32600ffa67878469e1bd"
+    },
+    {
+      "file": "README.md",
+      "bytes": 1869,
+      "sha256": "ab84b9a011c964a739ea0a995ad3850821293804baa460559fdc5901b6e589f8"
+    },
+    {
+      "file": "交互规格.md",
+      "bytes": 8884,
+      "sha256": "cb2aeb2b219f6d4f7e55a94d29bd7b16a4d73788e90902ec6eff69215f2bb3cd"
+    },
+    {
+      "file": "审查与验证.md",
+      "bytes": 1345,
+      "sha256": "34a7aeb6286cbb852ad0a0968ede2b8a04fa5a12ad5c998d782e06dbaa36e8bc"
+    },
+    {
+      "file": "飞书接入调研.md",
+      "bytes": 13006,
+      "sha256": "f617a39c655536d3fe2eddc01a48f6b81d41b10ee8eda42270851fac490a47ec"
+    },
+    {
+      "file": "related/android-floating-capture.png",
+      "bytes": 1757212,
+      "sha256": "4e4359c83e7484d68902601d08da0dab7db2a0ca2b2eabe668a26eb287b50b16",
+      "width": 1586,
+      "height": 992
+    },
+    {
+      "file": "related/web-task-board.png",
+      "bytes": 1636476,
+      "sha256": "173086ef956a0e6882dae91e3d53eb63b9290f0df53b22202fd8f4d5986bb57a",
+      "width": 1585,
+      "height": 992
+    }
+  ]
+}

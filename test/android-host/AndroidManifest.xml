@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.companion.sharetest" android:versionCode="1" android:versionName="1.0">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+  <application android:label="Companion QA Source" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
+    <activity android:name=".ShareActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+    <provider android:name=".ImageProvider" android:authorities="org.companion.sharetest.images" android:exported="false" android:grantUriPermissions="true" />
+  </application>
+</manifest>

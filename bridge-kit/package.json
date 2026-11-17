@@ -1,0 +1,18 @@
+{
+  "name": "codex-feishu-desktop-bridge",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "doctor": "node src/doctor.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.74.0"
+  },
+  "license": "MIT"
+}

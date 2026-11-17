@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'test/browser',timeout:30000,expect:{timeout:7000},fullyParallel:false,workers:1,retries:0,reporter:'list',use:{baseURL:'http://127.0.0.1:19119',headless:true,viewport:{width:1440,height:1000},trace:'retain-on-failure',screenshot:'only-on-failure'},outputDir:'test/.runtime/browser-results',webServer:{command:'node --no-warnings test/serve-ui.mjs',url:'http://127.0.0.1:19119/api/health',reuseExistingServer:false,timeout:30000}});

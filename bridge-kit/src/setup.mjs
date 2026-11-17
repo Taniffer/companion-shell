@@ -1,0 +1,14 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { latestServer, root } from './config.mjs';
+const path=join(root,'config.local.json');
+const config=existsSync(path)?JSON.parse(readFileSync(path,'utf8').replace(/^\uFEFF/,'')):{feishu:{appId:'',secretFile:'data/app-secret.dpapi',ownerOpenId:'',allowedChatIds:[]},desktop:{},pollMs:3000,maxConcurrent:2};
+config.desktop.codexHome=process.env.CODEX_HOME??join(homedir(),'.codex');
+config.desktop.serverPath=latestServer(config.desktop.codexHome);
+config.desktop.pipePath=process.env.CODEX_APP_TOOLS_PIPE_PATH??config.desktop.pipePath;
+config.desktop.controllerThreadId=process.env.CODEX_THREAD_ID??config.desktop.controllerThreadId;
+if(!config.desktop.controllerThreadId)throw new Error('首次安装请在 Codex 桌面端对话中运行安装脚本，以绑定桌面任务接口。');
+mkdirSync(join(root,'data'),{recursive:true});
+writeFileSync(path,JSON.stringify(config,null,2));
+console.log('桌面端连接信息已配置。');

@@ -1,0 +1,5 @@
+Edit the supplied Chinese task-board UI screenshot with three tightly scoped usability corrections, preserving its entire existing layout, colors, fonts, logo, columns, all role counts, and all other cards.
+1. In the “未完成” column, the life-assistant card “整理周末出行资料” currently says “等你补充日期”. Add a small clear amber outlined action button exactly “补充日期” in the lower-right part of THAT card, making the user's necessary next action obvious.
+2. In the “已完成” column, change ONLY the first task title from “保存本周收藏片段” to “整理本周收藏资料包”. This must represent a completed real work goal, not an individual quick capture. Keep its “生活助理”, completed status and “查看资料” action.
+3. In the bottom card of the “未完成” column, change the title “招募阅读助理” to “整理阅读资料与笔记”. Keep the “秘书” role, waiting state and timestamp. Remove the “查看建议” button from that card, leaving the same card style. Recruitment belongs to the secretary's management suggestions rather than cluttering the person's task list.
+Everything else remains identical. Keep all eight tasks and 2/4/2 column counts. Accurate Chinese typography, no redesign or new elements outside these local changes.

@@ -1,0 +1,26 @@
+{
+  "name": "companion-mvp",
+  "version": "0.2.0",
+  "description": "A local companion for Codex Desktop, Feishu and Android capture.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "start": "node --no-warnings src/main.mjs",
+    "test": "node --no-warnings --test test/*.test.mjs",
+    "doctor": "node --no-warnings src/doctor.mjs",
+    "check": "node scripts/check.mjs",
+    "test:browser": "playwright test",
+    "test:bridge": "node --no-warnings --test bridge-kit/test/*.test.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.76.0",
+    "qrcode": "1.5.4",
+    "selfsigned": "5.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}
