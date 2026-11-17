@@ -17,6 +17,14 @@ MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.2.0**�
 
 模型登录、推理和实际工具执行交给已安装的官方 Codex Desktop。该项目不要求额外购买模型 API。
 
+## 下载
+
+- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.2.0/companion-mvp-0.2.0-windows.zip)
+- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.2.0/companion-capture-0.2.0.apk)
+- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.2.0)
+
+本次为预览版；飞书账号授权及部分平台链路仍在实际验收中，具体见验证记录。
+
 ## 在 Windows 使用
 
 需要已登录的 Codex Desktop，以及你自己的飞书应用机器人。已有兼容的 Codex 飞书桥接时：

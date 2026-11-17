@@ -18,6 +18,7 @@ android/build/
 *.keystore
 *.zip
 *.apk
+*.idsig
 !dist/companion-capture-0.2.0.apk
 
 **/build/
