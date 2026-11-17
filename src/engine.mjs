@@ -64,7 +64,7 @@ export class Engine {
     if(task.private===false&&captures.length)throw new AppError(403,'私人登记资料请在个人事项中使用');
     const selected=[...new Set([...(task.captureIds??[]),...captureIds])];
     for(const capture of captures)for(const file of capture.attachments??[])validFile(file.path,join(this.dataDir,'captures'),8*1024*1024);
-    task=this.db.putTask({...task,captureIds:selected,status:'queued',businessState:'open',completedAt:null,actionVersion:(task.actionVersion??0)+1,ownerGeneration:task.ownerGeneration??1,hasFinal:false,lastRequest:goal,summary:internal?'正在接回专业结果。':'已收到，等待处理。'});
+    task=this.db.putTask({...task,captureIds:selected,archived:internal?task.archived:false,status:'queued',businessState:'open',completedAt:null,actionVersion:(task.actionVersion??0)+1,ownerGeneration:task.ownerGeneration??1,hasFinal:false,lastRequest:goal,summary:internal?'正在接回专业结果。':'已收到，等待处理。'});
     if(task.threadId&&!this.db.session(task.id,task.role))this.db.putSession({taskId:task.id,roleId:task.role,threadId:task.threadId,generation:task.ownerGeneration??1});
     const session=this.db.session(task.id,role),sessionThread=session?.threadId??(role===task.role?task.threadId:null);
     const scope=sessionThread?`thread:${sessionThread}`:`companion:${task.id}:${role}`;
@@ -173,7 +173,7 @@ export class Engine {
     const existing=this.db.task(id);if(actionId&&existing?.lastStateAction===actionId&&existing.businessState===businessState)return existing;
     const task=await this.refreshTask(id,true);
     if(businessState==='completed'&&(this.store.jobs(ACTIVE_JOBS).some(j=>this.taskForJob(j)?.id===task.id)||['running','starting','syncing','waiting'].includes(task.status)))throw new AppError(409,'当前仍在执行，请等本轮结束后再确认完成');
-    return this.db.patchTask(task.id,{businessState,lastStateAction:actionId??null,completedAt:businessState==='completed'?Date.now():null,actionVersion:(task.actionVersion??1)+1});
+    const changed=this.db.patchTask(task.id,{businessState,lastStateAction:actionId??null,completedAt:businessState==='completed'?Date.now():null,actionVersion:(task.actionVersion??1)+1});this.feishuRuntime?.taskChanged(task.id);return changed;
   }
   capability(task,actorRole=null){const dir=join(this.dataDir,'capabilities');mkdirSync(dir,{recursive:true});const roleSuffix=actorRole?'.'+actorRole:'';const key='capability:'+task.id+(actorRole?':'+actorRole:'');const path=join(dir,task.id+roleSuffix+'.json');const generation=task.ownerGeneration??1;if(!existsSync(path)||this.db.get(key+':generation')!==generation){const credential=task.id+roleSuffix+'.'+token();writeFileSync(path,JSON.stringify({taskId:task.id,roleId:actorRole??task.role,token:credential}),{mode:0o600});this.db.set(key,hash(credential));this.db.set(key+':generation',generation);}return path;}
   async openNative(threadId){await this.desktop.connect();const tool=this.desktop.catalog.find(t=>t.name==='navigate_to_codex_page');if(!tool?.inputSchema?.properties?.threadId)throw new AppError(501,'当前桌面版本没有可用的打开接口，请在 Codex 侧栏按事项标题找到原对话。');return this.read('navigate_to_codex_page',{threadId});}

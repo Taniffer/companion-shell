@@ -1,8 +1,8 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "date": "2026-11-18",
   "automated": {
-    "backendTests": 61,
+    "backendTests": 62,
     "bridgeTests": 35,
     "browserCases": 7,
     "windowsInstallerCases": 2,
@@ -51,19 +51,27 @@
     "nativeClickCallbackVerified": false,
     "nativeMenuVerified": false,
     "independentBotCreatedVerified": false,
-    "platformDisableVerified": false
+    "platformDisableVerified": false,
+    "eightNativeTemplatesAccepted": true,
+    "injectedCallbackThenRealCodexAndFeishuReturn": true,
+    "realFeishuArtifactDownloadedAndMatched": true,
+    "realWebContinuationSameTaskAndNativeThread": true,
+    "archivedTaskContinuationRestoredToBoard": true,
+    "businessStatePatchAcceptedByRealFeishu": true
+  },
+  "githubCi": {
+    "previousVerifiedVersion": "0.2.0",
+    "status": "success",
+    "url": "https://github.com/Taniffer/companion-shell/actions/runs/44156471548",
+    "currentWorkflow": "https://github.com/Taniffer/companion-shell/actions"
   },
   "releaseSmoke": {
     "bundledNode": "22.19.0",
-    "backendPassed": 61,
+    "backendPassed": 62,
     "bridgePassed": 35,
     "browserPassed": 7,
     "installerPassed": 2,
     "apkSha256": "c9b3ef84ad57f4719c31947f5a0b46ecf3b83a3680838e0da468bd75c2ebe2ea",
-    "source": "fresh extraction of actual 0.2 Windows zip"
-  },
-  "githubCi": {
-    "status": "success",
-    "url": "https://github.com/Taniffer/companion-shell/actions/runs/44154436097"
+    "source": "fresh extraction of actual 0.2.1 Windows zip"
   }
 }

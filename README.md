@@ -2,7 +2,7 @@
 
 给 Codex Desktop 一个贴近生活的壳：飞书上交代事情，电脑上看任务进展，手机上随手记。默认一位秘书，有稳定的专业需要时再招募独立助理。
 
-MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.2.0**，以 Windows + Codex Desktop 为主机。
+MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.2.1**，以 Windows + Codex Desktop 为主机。
 
 ![任务看板，隔离验收数据](docs/images/board-v2.png)
 
@@ -19,9 +19,11 @@ MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.2.0**�
 
 ## 下载
 
-- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.2.0/companion-mvp-0.2.0-windows.zip)
-- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.2.0/companion-capture-0.2.0.apk)
-- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.2.0)
+- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.2.1/companion-mvp-0.2.1-windows.zip)
+- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.2.1/companion-capture-0.2.0.apk)
+- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.2.1)
+
+0.2.1 修正跨入口状态刷新与归档后续接；Android 仍为 0.2.0，无需重复安装。
 
 本次为预览版；飞书账号授权及部分平台链路仍在实际验收中，具体见验证记录。
 

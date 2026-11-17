@@ -1,0 +1,52 @@
+{
+  "callback": {
+    "trigger": "injected callback on genuinely issued Feishu form",
+    "nativeClientClickVerified": false,
+    "callbackDeduped": true,
+    "realCodexDesktop": true,
+    "realProgressCard": true,
+    "realFeishuTextMessages": 1,
+    "realFeishuFileMessages": 1,
+    "fileDownloadedBackFromFeishu": true,
+    "fileMatchesModelArtifact": true,
+    "artifactBytes": 166,
+    "sha256": "5cb48156d01cc9f7633f2c0460b3a823cb38489b2ee1488472c8f614c96e1bf7"
+  },
+  "webContinuation": {
+    "trigger": "real Web UI continuation after injected Feishu callback",
+    "sameTask": true,
+    "sameNativeThread": true,
+    "realFeishuReplyCount": 1,
+    "realFeishuFileCount": 1,
+    "fileReadBackFromFeishu": true,
+    "oldArtifactSnapshotPreserved": true,
+    "newArtifactMatchesFeishu": true,
+    "artifactSnapshots": 2,
+    "sha256": "df9df8394de1c049b917230015c7a6d68a0f717b6803e0609b037a34d69ad621"
+  },
+  "stateRefresh": {
+    "states": [
+      {
+        "businessState": "open",
+        "realFeishuPatchAccepted": true,
+        "exactPayloadHashMatched": true
+      },
+      {
+        "businessState": "completed",
+        "realFeishuPatchAccepted": true,
+        "exactPayloadHashMatched": true
+      }
+    ],
+    "nativeClientDisplayVerified": false,
+    "transport": "actual coordinator -> real Feishu patch API"
+  },
+  "archivedContinuation": {
+    "trigger": "real Web UI followup to archived task",
+    "sameTask": true,
+    "sameNativeThread": true,
+    "archived": false,
+    "inDefaultBoard": true,
+    "actualModelFinalMatched": true,
+    "realFeishuReplyCount": 1
+  }
+}

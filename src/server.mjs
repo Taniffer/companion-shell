@@ -27,7 +27,7 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
       if(!['127.0.0.1','localhost'].includes((req.headers.host??'').split(':')[0]))throw new AppError(403,'工作台只接受本机地址');
       const url=new URL(req.url,uiOrigin()),path=url.pathname;
       if(req.method==='POST'&&path==='/api/session'){checkOrigin(req);if(!equal(req.headers.authorization?.replace(/^Bearer /,''),adminKey))throw new AppError(401,'请从启动入口重新打开工作台');markSession(res);send(res,{ok:true});return;}
-      if(path==='/api/health'){send(res,{ok:true,service:'companion-workbench',version:'0.2.0'});return;}
+      if(path==='/api/health'){send(res,{ok:true,service:'companion-workbench',version:'0.2.1'});return;}
       if(path.startsWith('/api/agent/')){
         checkOrigin(req);
         const credential=req.headers.authorization?.replace(/^Bearer /,'')??'',actorId=credential.split('.')[0];
@@ -114,7 +114,7 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
     try{
       if(req.headers.origin)throw new AppError(403,'此入口只供已配对的记录应用使用');
       const path=new URL(req.url,'https://localhost').pathname;
-      if(req.method==='GET'&&path==='/mobile/health'){send(res,{ok:true,service:'companion-capture',version:'0.2.0'});return;}
+      if(req.method==='GET'&&path==='/mobile/health'){send(res,{ok:true,service:'companion-capture',version:'0.2.1'});return;}
       if(req.method==='POST'&&path==='/mobile/pair'){
         const ip=req.socket.remoteAddress??'unknown';const attempt=attempts.get(ip)??{count:0,until:Date.now()+60000};if(attempt.until<Date.now()){attempt.count=0;attempt.until=Date.now()+60000;}attempt.count++;attempts.set(ip,attempt);if(attempts.size>1000)attempts.delete(attempts.keys().next().value);if(attempt.count>10)throw new AppError(429,'尝试较多，请一分钟后再试');
         const input=await body(req,10000),pairing=db.get('pairing');if(!pairing||pairing.expires<Date.now()||!equal(hash(String(input.ticket??'')),pairing.hash))throw new AppError(401,'配对信息已失效，请在电脑重新生成');
@@ -132,7 +132,7 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
   for(const server of [local,mobile]){server.requestTimeout=30000;server.headersTimeout=15000;server.on('clientError',(_,socket)=>socket.destroy());}
   const listen=(server,port,host)=>new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
   try{await listen(local,uiPort,'127.0.0.1');await listen(mobile,mobilePort,mobileHost);}catch(error){local.close();mobile.close();throw error;}
-  const status={pid:process.pid,uiPort:local.address().port,mobilePort:mobile.address().port,uiUrl:uiOrigin(),startedAt:new Date().toISOString(),version:'0.2.0'};
+  const status={pid:process.pid,uiPort:local.address().port,mobilePort:mobile.address().port,uiUrl:uiOrigin(),startedAt:new Date().toISOString(),version:'0.2.1'};
   writeFileSync(join(dataDir,'status.json'),JSON.stringify(status,null,2));
   return {local,mobile,status,adminKey,captures,pin:tlsInfo.pin,createPairing,close:async()=>{await Promise.all([new Promise(r=>local.close(r)),new Promise(r=>mobile.close(r))]);}};
 }
