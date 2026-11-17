@@ -1,0 +1,39 @@
+{
+  "trigger": "synthetic template validation",
+  "transport": "real Feishu message API",
+  "clickCallbacksVerified": false,
+  "cases": [
+    {
+      "template": "task",
+      "accepted": true
+    },
+    {
+      "template": "list",
+      "accepted": true
+    },
+    {
+      "template": "capture-form",
+      "accepted": true
+    },
+    {
+      "template": "task-form",
+      "accepted": true
+    },
+    {
+      "template": "assign-form",
+      "accepted": true
+    },
+    {
+      "template": "recruit-form",
+      "accepted": true
+    },
+    {
+      "template": "team",
+      "accepted": true
+    },
+    {
+      "template": "retire-plan",
+      "accepted": true
+    }
+  ]
+}
