@@ -9,6 +9,10 @@ import { certificate } from './certificate.mjs';
 import { Captures } from './captures.mjs';
 import { exportData } from './export.mjs';
 import {taskBucket,taskLabel} from './task-state.mjs';
+import {taskMemories,recentWork} from './task-context.mjs';
+import {findTasks,taskIntent} from './task-search.mjs';
+
+const VERSION=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.ico':'image/x-icon','.png':'image/png','.jpg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.json':'application/json','.svg':'image/svg+xml'};
 function body(req,limit=24*1024*1024){return new Promise((resolve,reject)=>{let size=0,chunks=[];req.on('data',chunk=>{size+=chunk.length;if(size>limit){reject(new AppError(413,'内容过大'));req.destroy();}else chunks.push(chunk);});req.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}'));}catch{reject(new AppError(400,'请求内容格式不正确'));}});req.on('error',reject);});}
@@ -27,28 +31,57 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
       if(!['127.0.0.1','localhost'].includes((req.headers.host??'').split(':')[0]))throw new AppError(403,'工作台只接受本机地址');
       const url=new URL(req.url,uiOrigin()),path=url.pathname;
       if(req.method==='POST'&&path==='/api/session'){checkOrigin(req);if(!equal(req.headers.authorization?.replace(/^Bearer /,''),adminKey))throw new AppError(401,'请从启动入口重新打开工作台');markSession(res);send(res,{ok:true});return;}
-      if(path==='/api/health'){send(res,{ok:true,service:'companion-workbench',version:'0.2.1'});return;}
+      if(path==='/api/health'){send(res,{ok:true,service:'companion-workbench',version:VERSION});return;}
       if(path.startsWith('/api/agent/')){
         checkOrigin(req);
         const credential=req.headers.authorization?.replace(/^Bearer /,'')??'',actorId=credential.split('.')[0];
         const actor=db.task(actorId),actorRole=credential.split('.').length>=3?credential.split('.')[1]:actor?.role,stored=db.get(`capability:${actorId}`+(credential.split('.').length>=3?':'+actorRole:''));
-        if(!actor||!stored||!equal(hash(credential),stored)||db.get(`capability:${actorId}`+(credential.split('.').length>=3?':'+actorRole:'')+':generation')!==(actor.ownerGeneration??1)||['retired','retiring'].includes(engine.roles.get(actorRole)?.status)||(actorRole!=='assistant'&&actorRole!==actor.role))throw new AppError(401,'本次事项的工作凭证无效');
+        if(!actor||!stored||!equal(hash(credential),stored)||db.get(`capability:${actorId}`+(credential.split('.').length>=3?':'+actorRole:'')+':generation')!==(actor.ownerGeneration??1))throw new AppError(401,'本次事项的工作凭证无效');
+        const roleStatus=engine.roles.get(actorRole)?.status;
+        const inFlight=()=>engine.store.jobs(['dispatching','pendingThread','running','finishing']).some(j=>j.actorRole===actorRole&&j.companionTaskId===actor.id);
+        if(!roleStatus||roleStatus==='retired'||(roleStatus==='retiring'&&!inFlight())||(actorRole!=='assistant'&&actorRole!==actor.role&&!inFlight()))throw new AppError(401,'本次事项的工作凭证无效');
+        const canPlanStaffing=actorRole==='assistant'&&!actor.parentId&&actor.private===true;
         if(path==='/api/agent/context'&&req.method==='GET'){
           const query=url.searchParams.get('q')??'';
           const terms=query.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0,12);
-          const selected=(actor.parentId||actorRole!=='assistant')?(actor.captureIds??[]).map(id=>db.capture(id)).filter(c=>c&&terms.every(term=>`${c.text??''} ${c.title??''} ${c.url??''}`.toLowerCase().includes(term))).map(({contentHash,...c})=>c):db.captures(query,20);
-          const memories=db.get('memories',[]).filter(m=>m.enabled!==false&&(m.scope==='personal'||(m.scope==='role'&&(m.roleId===actorRole||actorRole==='assistant'))||(m.scope==='task'&&db.task(m.taskId)?.id===actor.id)||(m.scope==='project'&&m.projectId===actor.project?.projectId)));
-          send(res,{captures:actor.private===false?[]:selected,memories:actor.private===false?[]:memories});return;
+          const selected=(actor.parentId||actorRole!=='assistant')?engine.captureIdsFor(actor,actorRole).map(id=>db.capture(id)).filter(c=>c&&terms.every(term=>`${c.text??''} ${c.title??''} ${c.url??''}`.toLowerCase().includes(term))).map(({contentHash,...c})=>c):db.captures(query,20);
+          send(res,{captures:actor.private===true?selected:[],memories:taskMemories(db,actor,actorRole,query)});return;
         }
         if(path==='/api/agent/state'&&req.method==='POST'){const input=await body(req,10000);if(!['open','waiting_user'].includes(input.businessState))throw new AppError(400,'工作接口只可标记等待补充或继续推进；完成由用户确认');const effectKey=input.requestId?'agent-state:'+actor.id+':'+input.requestId:null,prior=effectKey?db.get(effectKey):null;if(prior){send(res,prior);return;}const result=db.transaction(()=>{const task=db.patchTask(actor.id,{businessState:input.businessState,waitingReason:text(input.reason,1000),actionVersion:(actor.actionVersion??1)+1}),result={taskId:task.id,businessState:task.businessState};if(effectKey)db.set(effectKey,result);return result;});engine.feishuRuntime?.taskChanged(actor.id);send(res,result);return;}
-        if(path==='/api/agent/roles'&&req.method==='GET'){send(res,{roles:engine.roles.list().map(r=>({id:r.id,name:r.name,brief:r.brief,status:r.status})),proposals:engine.roles.proposals().filter(p=>p.status==='pending')});return;}
-        if(path==='/api/agent/roles/propose'&&req.method==='POST'){if(actorRole!=='assistant'||actor.parentId||actor.private===false)throw new AppError(403,'请由私人秘书提出长期分工建议');const proposal=engine.roles.propose(await body(req,10000),actor.id);engine.feishuRuntime?.notifyProposal(proposal);send(res,{proposal,requiresUserDecision:true});return;}
+        if(path==='/api/agent/roles'&&req.method==='GET'){
+          if(!canPlanStaffing)throw new AppError(403,'长期分工由个人助理安排');
+          const roles=db.roles().map(({id,name,brief,status})=>({id,name,brief:brief.slice(0,350),status}));
+          const proposals=engine.roles.proposals().slice(-8).map(({id,kind,name,roleId,status,resultRoleId})=>({id,kind,name,roleId,status,resultRoleId}));
+          send(res,{roles,proposals,recentWork:recentWork(db,actor.id)});return;
+        }
+        if(path==='/api/agent/roles/propose'&&req.method==='POST'){
+          if(!canPlanStaffing)throw new AppError(403,'请由个人助理提出长期分工建议');
+          const proposal=engine.roles.propose(await body(req,20000),actor.id);
+          if(proposal.status==='pending')engine.feishuRuntime?.notifyProposal(proposal);
+          send(res,{proposal,requiresUserDecision:proposal.status==='pending'});return;
+        }
         const targetMatch=path.match(/^\/api\/agent\/tasks\/([0-9a-f-]+)$/i);
-        if(targetMatch&&req.method==='GET'){const target=db.task(targetMatch[1]);if(!target||(target.id!==actor.id&&target.parentId!==actor.id))throw new AppError(403,'只能查看本次事项及其专业子事项');send(res,{task:await engine.refreshTask(target.id)});return;}
+        if(targetMatch&&req.method==='GET'){
+          const target=db.task(targetMatch[1]);
+          if(!target||(target.id!==actor.id&&(actorRole!=='assistant'||target.parentId!==actor.id)))throw new AppError(403,'只能查看本次事项及其专业子事项');
+          if(target.id===actor.id){
+            const own=await engine.refreshTask(target.id,false,actorRole);
+            send(res,{task:{id:own.id,title:own.title,role:actorRole,parentId:own.parentId,status:own.status,
+              businessState:own.businessState,messages:own.messages,
+              artifacts:actorRole==='assistant'?own.artifacts:db.artifacts(own.id),
+              children:actorRole==='assistant'?own.children.map(({id,title,role,status})=>({id,title,role,status})):[]}
+            });return;
+          }
+          const {id,title,role,status,summary,businessState}=target;
+          send(res,{task:{id,title,role,status,summary,businessState,artifacts:db.artifacts(id)}});return;
+        }
         if(path==='/api/agent/delegate'&&req.method==='POST'){
           if(actor.parentId||actorRole!=='assistant')throw new AppError(403,'专业子事项不再转包');
-          const input=await body(req,100000);if(!engine.roles.get(input.role)||input.role==='assistant')throw new AppError(400,'请选择量化、产品或生活专业方向');
-          const task=engine.enqueue({goal:input.goal,title:input.title,role:input.role,parentId:actor.id,captureIds:input.captureIds??actor.captureIds??[],requestId:`agent:${actor.id}:${input.requestId??randomUUID()}`});send(res,{task,asynchronous:true,next:'先结束本轮并汇报安排，专业结果将自动接回。'},202);return;
+          const input=await body(req,100000);if(!engine.roles.get(input.role)||input.role==='assistant')throw new AppError(400,'请选择适合这件事的专业协作者');
+          const captureIds=input.captureIds??[];
+          const allowed=new Set(engine.captureIdsFor(actor,actorRole));
+          if(!Array.isArray(captureIds)||captureIds.some(id=>!allowed.has(id)))throw new AppError(403,'只能分派这项任务已关联的资料');
+          const task=engine.enqueue({goal:input.goal,title:input.title,role:input.role,parentId:actor.id,captureIds,requestId:`agent:${actor.id}:${input.requestId??randomUUID()}`});send(res,{task,asynchronous:true,next:'结束本轮后继续等专业结果，助理会自动整合。'},202);return;
         }
         throw new AppError(404,'找不到这项工作接口');
       }
@@ -58,29 +91,56 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
         if(!['GET','HEAD'].includes(req.method)&&req.headers['x-companion']!=='1'&&!req.headers.authorization)throw new AppError(403,'缺少操作标记');
         if(req.method==='GET'&&path==='/api/overview'){
           let warning='';try{await engine.importThreads();}catch(error){warning='暂时未连上 Codex，仍可登记资料。';log('desktop_import_error',{message:error.message});}
-          const bridgeStatus=engine.status?.()??{};send(res,{tasks:db.tasks(),captureCount:db.sql.prepare('SELECT count(*) AS n FROM captures').get().n,devices:db.devices(),warning,bridge:bridgeStatus,roles:engine.roles.list(),roleProposals:engine.roles.proposals().filter(p=>p.status==='pending'),addresses:addresses(),uiPort:local.address().port,mobilePort:mobile.address().port});return;
+          const bridgeStatus=engine.status?.()??{};send(res,{tasks:db.tasks(),captureCount:db.sql.prepare('SELECT count(*) AS n FROM captures').get().n,devices:db.devices(),warning,bridge:bridgeStatus,roles:engine.roles.list(),roleProposals:engine.roles.staffingCards(),addresses:addresses(),uiPort:local.address().port,mobilePort:mobile.address().port});return;
         }
         if(req.method==='GET'&&path==='/api/board'){
           const options={query:(url.searchParams.get('q')??'').slice(0,300),role:url.searchParams.get('role')??'all',includeImported:url.searchParams.get('includeChats')==='1',archived:url.searchParams.get('archived')==='1'};
-          const columns={};for(const bucket of ['running','unfinished','completed'])columns[bucket]=db.boardTasks({...options,bucket,limit:Math.min(1000,Math.max(20,Number(url.searchParams.get(bucket+'Limit'))||20)),offset:Math.max(0,Number(url.searchParams.get(bucket+'Offset'))||0)});
-          send(res,{columns,allCounts:db.boardCounts({...options,role:'all'}),counts:db.boardCounts(options),roles:engine.roles.list().map(r=>({...r,counts:db.boardCounts({...options,role:r.id})})),updatedAt:Date.now()});return;
+          const rootOnly=url.searchParams.get('groupChildren')==='1'&&options.role==='all';
+          const columns={};for(const bucket of ['running','unfinished','completed'])columns[bucket]=db.boardTasks({...options,rootOnly,bucket,limit:Math.min(1000,Math.max(20,Number(url.searchParams.get(bucket+'Limit'))||20)),offset:Math.max(0,Number(url.searchParams.get(bucket+'Offset'))||0)});
+          send(res,{columns,allCounts:db.boardCounts({...options,role:'all',rootOnly}),counts:db.boardCounts({...options,rootOnly}),roles:engine.roles.list().map(r=>({...r,counts:db.boardCounts({...options,role:r.id})})),updatedAt:Date.now()});return;
         }
         if(req.method==='GET'&&path==='/api/roles'){send(res,{roles:engine.roles.list()});return;}
-        if(req.method==='POST'&&path==='/api/roles'){const input=await body(req,10000),role=engine.roles.create(input);if(input.proposalId)engine.roles.resolveProposal(input.proposalId,'accepted');send(res,{role},201);return;}
-        const proposalMatch=path.match(/^\/api\/role-proposals\/([a-z0-9-]+)\/dismiss$/);if(proposalMatch&&req.method==='POST'){send(res,{proposal:engine.roles.resolveProposal(proposalMatch[1],'dismissed')});return;}
+        if(req.method==='GET'&&path==='/api/task-find'){
+          send(res,findTasks(db,url.searchParams.get('q'),{
+            role:url.searchParams.get('role')??'all',includeImported:url.searchParams.get('includeChats')==='1'
+          }));return;
+        }
+        if(req.method==='POST'&&path==='/api/roles'){
+          const input=await body(req,10000);
+          if(input.proposalId){
+            if(engine.roles.proposal(input.proposalId).kind!=='recruit')throw new AppError(400,'这项安排不是招募');
+            const proposal=engine.roles.decide(input.proposalId,'approve');
+            send(res,{proposal,role:proposal.resultRoleId?engine.roles.get(proposal.resultRoleId):null},201);return;
+          }
+          send(res,{role:engine.roles.create(input)},201);return;
+        }
+        const proposalMatch=path.match(/^\/api\/role-proposals\/([a-z0-9-]+)\/(approve|dismiss)$/);
+        if(proposalMatch&&req.method==='POST'){send(res,{proposal:engine.roles.decide(proposalMatch[1],proposalMatch[2])});return;}
         const qrRole=path.match(/^\/api\/roles\/([a-z][a-z0-9-]+)\/qr$/);if(qrRole&&req.method==='GET'){if(!engine.feishuRuntime)throw new AppError(503,'开通入口尚未准备');const png=await engine.feishuRuntime.qr(qrRole[1]);res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(png);return;}
         const roleMatch=path.match(/^\/api\/roles\/([a-z][a-z0-9-]+)(?:\/(retirement|retire|provision|bind|disable|check))?$/);
         if(roleMatch){const id=roleMatch[1],action=roleMatch[2];
           if(req.method==='POST'&&action==='check'){if(!engine.feishuRuntime)throw new AppError(503,'飞书连接尚未准备');send(res,engine.feishuRuntime.checkConnection(id),202);return;}
           if(req.method==='GET'&&action==='retirement'){const plan=engine.roles.retirement(id);const {pairing,...safeRole}=plan.role;send(res,{...plan,role:safeRole});return;}
-          if(req.method==='POST'&&action==='retire'){const result=await engine.roles.retire(id,await body(req,10000));engine.feishuRuntime?.disableRole(id).catch(error=>log('role_disable_pending',{roleId:id,code:error.code??'platform_failed'}));send(res,result);return;}
+          if(req.method==='POST'&&action==='retire'){const proposal=engine.roles.confirmRetirement(id,await body(req,10000));send(res,{proposal,role:engine.roles.get(id)},202);return;}
           if(req.method==='POST'&&action==='provision'){if(!engine.feishuRuntime)throw new AppError(503,'飞书开通入口尚未准备好');send(res,engine.feishuRuntime.provision(id),202);return;}
           if(req.method==='POST'&&action==='bind'){if(!engine.feishuRuntime)throw new AppError(503,'飞书入口尚未准备好');send(res,await engine.feishuRuntime.bindExisting(id,await body(req,10000)));return;}
           if(req.method==='POST'&&action==='disable'){if(!engine.feishuRuntime)throw new AppError(503,'飞书入口尚未准备好');send(res,await engine.feishuRuntime.disableRole(id));return;}
         }
         if(req.method==='GET'&&path==='/api/tasks'){try{await engine.importThreads();}catch{}send(res,db.listTasks({query:(url.searchParams.get('q')??'').slice(0,300),offset:Math.max(0,parseInt(url.searchParams.get('offset')??'0',10)||0),limit:60,archived:url.searchParams.get('archived')==='1',conversations:url.searchParams.get('chats')==='1'}));return;}
         if(req.method==='POST'&&path==='/api/history'){send(res,await engine.importHistory());return;}
-        if(req.method==='POST'&&path==='/api/tasks'){const input=await body(req,100000);send(res,{task:engine.enqueue(input)},202);return;}
+        if(req.method==='POST'&&path==='/api/tasks'){
+          const input=await body(req,100000);
+          const intent=input.interpret===true&&(!input.role||input.role==='assistant')&&!input.captureIds?.length?taskIntent(input.goal):null;
+          if(intent){
+            const found=findTasks(db,intent.query,{limit:6});
+            if((intent.mode==='continue'||intent.mode==='focus')&&found.uniqueTaskId){
+              const task=intent.goal?engine.enqueue({...input,goal:intent.goal,taskId:found.uniqueTaskId,role:'assistant'}):db.task(found.uniqueTaskId);
+              send(res,{task},intent.goal?202:200);return;
+            }
+            send(res,{search:{...intent,...found}});return;
+          }
+          send(res,{task:engine.enqueue(input)},202);return;
+        }
         const taskMatch=path.match(/^\/api\/tasks\/([0-9a-f-]+)(?:\/(messages|pause|resume|archive|open|state|assign))?$/i);
         if(taskMatch?.[2]==='state'&&req.method==='POST'){send(res,{task:await engine.setTaskState(taskMatch[1],(await body(req,10000)).businessState)});return;}
         if(taskMatch?.[2]==='assign'&&req.method==='POST'){const input=await body(req,10000);send(res,{task:await engine.roles.handoff(taskMatch[1],input.roleId,{expectedVersion:input.expectedVersion})});return;}
@@ -105,7 +165,7 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
         throw new AppError(404,'找不到这个操作');
       }
       if(!['GET','HEAD'].includes(req.method))throw new AppError(405,'不支持这个请求');
-      const assets={'/':'index.html','/app.js':'app.js','/app.css':'app.css','/v2.css':'v2.css','/favicon.ico':'companion.ico'};const filename=assets[path];if(!filename)throw new AppError(404,'页面不存在');
+      const assets={'/':'index.html','/app.js':'app.js','/app.css':'app.css','/v2.css':'v2.css','/v3.css':'v3.css','/favicon.ico':'companion.ico'};const filename=assets[path];if(!filename)throw new AppError(404,'页面不存在');
       const bytes=readFileSync(join(root,'web',filename));res.writeHead(200,{'Content-Type':MIME[extname(filename)],'Content-Length':bytes.length,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"});res.end(req.method==='HEAD'?undefined:bytes);
     }catch(error){if(!res.headersSent)send(res,{error:publicError(error)},error.status??500);else res.destroy();if(!(error instanceof AppError))log('ui_error',{message:error.message});}
   };
@@ -114,7 +174,7 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
     try{
       if(req.headers.origin)throw new AppError(403,'此入口只供已配对的记录应用使用');
       const path=new URL(req.url,'https://localhost').pathname;
-      if(req.method==='GET'&&path==='/mobile/health'){send(res,{ok:true,service:'companion-capture',version:'0.2.1'});return;}
+      if(req.method==='GET'&&path==='/mobile/health'){send(res,{ok:true,service:'companion-capture',version:VERSION});return;}
       if(req.method==='POST'&&path==='/mobile/pair'){
         const ip=req.socket.remoteAddress??'unknown';const attempt=attempts.get(ip)??{count:0,until:Date.now()+60000};if(attempt.until<Date.now()){attempt.count=0;attempt.until=Date.now()+60000;}attempt.count++;attempts.set(ip,attempt);if(attempts.size>1000)attempts.delete(attempts.keys().next().value);if(attempt.count>10)throw new AppError(429,'尝试较多，请一分钟后再试');
         const input=await body(req,10000),pairing=db.get('pairing');if(!pairing||pairing.expires<Date.now()||!equal(hash(String(input.ticket??'')),pairing.hash))throw new AppError(401,'配对信息已失效，请在电脑重新生成');
@@ -132,7 +192,7 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
   for(const server of [local,mobile]){server.requestTimeout=30000;server.headersTimeout=15000;server.on('clientError',(_,socket)=>socket.destroy());}
   const listen=(server,port,host)=>new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
   try{await listen(local,uiPort,'127.0.0.1');await listen(mobile,mobilePort,mobileHost);}catch(error){local.close();mobile.close();throw error;}
-  const status={pid:process.pid,uiPort:local.address().port,mobilePort:mobile.address().port,uiUrl:uiOrigin(),startedAt:new Date().toISOString(),version:'0.2.1'};
+  const status={pid:process.pid,uiPort:local.address().port,mobilePort:mobile.address().port,uiUrl:uiOrigin(),startedAt:new Date().toISOString(),version:VERSION};
   writeFileSync(join(dataDir,'status.json'),JSON.stringify(status,null,2));
   return {local,mobile,status,adminKey,captures,pin:tlsInfo.pin,createPairing,close:async()=>{await Promise.all([new Promise(r=>local.close(r)),new Promise(r=>mobile.close(r))]);}};
 }

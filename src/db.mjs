@@ -19,6 +19,7 @@ export class Database {
       CREATE TABLE IF NOT EXISTS task_sessions (task_id TEXT NOT NULL,role_id TEXT NOT NULL,thread_id TEXT UNIQUE,generation INTEGER NOT NULL DEFAULT 1,value TEXT NOT NULL,PRIMARY KEY(task_id,role_id));
       CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY,status TEXT NOT NULL,value TEXT NOT NULL,updated INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS tasks_updated ON tasks(updated DESC);
+      CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_id);
       CREATE INDEX IF NOT EXISTS messages_task ON messages(task_id,created);
       CREATE INDEX IF NOT EXISTS captures_created ON captures(created DESC);
     `);
@@ -36,10 +37,12 @@ export class Database {
   action(id){const row=this.sql.prepare('SELECT value FROM actions WHERE id=?').get(id);return row?JSON.parse(row.value):null;}
   putAction(value){value={...value,updatedAt:Date.now()};this.sql.prepare('INSERT INTO actions VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,value=excluded.value,updated=excluded.updated').run(value.id,value.status,JSON.stringify(value),value.updatedAt);return value;}
   actions(statuses=['pending']){return this.sql.prepare('SELECT value FROM actions WHERE status IN ('+statuses.map(()=>'?').join(',')+') ORDER BY updated').all(...statuses).map(r=>JSON.parse(r.value));}
-  taskQuery({query='',role,bucket,archived=false,includeImported=true,conversations=false}={}){
+  taskQuery({query='',role,bucket,archived=false,includeImported=true,conversations=false,rootOnly=false,privateOnly=false}={}){
     const bucketSql=`CASE WHEN json_extract(t.value,'$.businessState')='completed' THEN 'completed' WHEN json_extract(t.value,'$.businessState')='waiting_user' THEN 'unfinished' WHEN json_extract(t.value,'$.status') IN ('running','starting','syncing') THEN 'running' WHEN json_extract(t.value,'$.status')='waiting' AND EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id=t.id AND json_extract(c.value,'$.status') IN ('running','starting','syncing')) THEN 'running' ELSE 'unfinished' END`;
     const clauses=["COALESCE(json_extract(t.value,'$.archived'),0)=?"],args=[archived?1:0];
     if(!includeImported)clauses.push("COALESCE(json_extract(t.value,'$.imported'),0)=0");
+    if(rootOnly)clauses.push('t.parent_id IS NULL');
+    if(privateOnly)clauses.push("json_extract(t.value,'$.private')=1");
     if(conversations)clauses.push('t.thread_id IS NOT NULL');
     if(query){clauses.push("instr(lower(COALESCE(json_extract(t.value,'$.title'),'')||' '||COALESCE(json_extract(t.value,'$.summary'),'')),lower(?))>0");args.push(query);}
     if(role&&role!=='all'){clauses.push("json_extract(t.value,'$.role')=?");args.push(role);}
@@ -51,6 +54,10 @@ export class Database {
   resolveTask(id){const exact=this.task(id)??this.byThread(id);if(exact)return exact;const matches=this.tasks(500).filter(t=>t.id.startsWith(id));return matches.length===1?matches[0]:null;}
   tasks(limit=100){return this.sql.prepare('SELECT value FROM tasks ORDER BY updated DESC LIMIT ?').all(Math.min(500,limit)).map(r=>JSON.parse(r.value));}
   tasksForRole(roleId){return this.sql.prepare("SELECT value FROM tasks WHERE json_extract(value,'$.role')=? ORDER BY updated DESC").all(roleId).map(r=>JSON.parse(r.value));}
+  children(taskId){return this.sql.prepare('SELECT value FROM tasks WHERE parent_id=? ORDER BY updated DESC').all(taskId).map(r=>JSON.parse(r.value));}
+  waitingParents(){
+    return this.sql.prepare("SELECT value FROM tasks WHERE json_extract(value,'$.waitingChildren')=1 AND COALESCE(json_extract(value,'$.archived'),0)=0 AND json_extract(value,'$.status')!='paused' ORDER BY updated").all().map(r=>JSON.parse(r.value));
+  }
   listTasks({query='',offset=0,limit=60,archived=false,conversations=false}={}){const clauses=["COALESCE(json_extract(value,'$.archived'),0)=?"],args=[archived?1:0];if(conversations)clauses.push('thread_id IS NOT NULL');if(query){clauses.push("instr(lower(COALESCE(json_extract(value,'$.title'),'')||' '||COALESCE(json_extract(value,'$.summary'),'')),lower(?))>0");args.push(query);}const where=clauses.join(' AND '),total=this.sql.prepare('SELECT count(*) AS n FROM tasks WHERE '+where).get(...args).n;const tasks=this.sql.prepare('SELECT value FROM tasks WHERE '+where+' ORDER BY updated DESC LIMIT ? OFFSET ?').all(...args,Math.min(200,Math.max(1,limit)),Math.max(0,offset)).map(r=>JSON.parse(r.value));return {tasks,total,nextOffset:offset+tasks.length,hasMore:offset+tasks.length<total};}
   putTask(task,{touch=true}={}){
     task={role:'assistant',businessState:'open',actionVersion:1,ownerGeneration:1,...task,updatedAt:touch?Date.now():(task.updatedAt??Date.now())};

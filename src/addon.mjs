@@ -24,6 +24,7 @@ export async function startCompanion({bridge,desktop,store,feishu,config,log,roo
   const routing=await import(pathToFileURL(join(bridgeRoot,'src','routing.mjs')).href);
   const feishuRuntime=new FeishuRuntime({engine,feishu,normalize:routing.normalize,log}).install();engine.feishuRuntime=feishuRuntime;
   const hooks=attachBridge({engine,bridge,store,desktop,feishu,normalize:routing.normalize,command:routing.command});
+  engine.roles.start();
   engine.status=()=>({feishuConnected:feishu.ws.getConnectionStatus().state==='connected',ownerPaired:!!engine.owner(),active:store.jobs(['running','queued','dispatching','pendingThread','finishing']).length,uncertain:store.jobs(['uncertain']).length,desktopAdapter:'Codex Desktop',lastStatusAt:Date.now()});
   for(const row of store.db.prepare('SELECT value FROM jobs ORDER BY created DESC LIMIT 200').all()){
     try{const job=JSON.parse(row.value);if(job.threadId)engine.onJob(job);}catch(error){engine.safeLog('history_import_error',error);}
@@ -32,5 +33,5 @@ export async function startCompanion({bridge,desktop,store,feishu,config,log,roo
   log('companion_started',{uiPort:server.status.uiPort,mobilePort:server.status.mobilePort});
   log('companion_tray_config',{platform:process.platform,enabled:options.showTray!==false});
   if(process.platform==='win32'&&options.showTray!==false){const trayEnv={...process.env};delete trayEnv.PSModulePath;const powershell=join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');const tray=spawn(powershell,['-STA','-NoProfile','-ExecutionPolicy','Bypass','-File',join(root,'scripts','tray.ps1')],{windowsHide:true,stdio:['ignore','ignore','pipe'],env:trayEnv});log('companion_tray_launched',{pid:tray.pid});tray.stderr.on('data',data=>log('tray_start_error',{message:data.toString().slice(0,1200)}));tray.on('error',error=>log('tray_start_error',{message:error.message}));tray.on('exit',code=>log('companion_tray_exit',{code}));tray.unref();}
-  return {engine,server,hooks,close:async()=>{clearInterval(timer);agentSpool.close();feishuRuntime.close();engine.close();await server.close();db.close();}};
+  return {engine,server,hooks,close:async()=>{clearInterval(timer);agentSpool.close();const staffing=engine.roles.close();engine.close();await staffing;feishuRuntime.close();await server.close();db.close();}};
 }

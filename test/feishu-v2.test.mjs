@@ -27,3 +27,81 @@ test('binding a bot owner cannot erase an earlier menu or publishing failure',as
 test('a creation-source restriction is recorded once and prevents repeating unsupported V7 requests',async t=>{const f=setup(t);let calls=0;f.feishu.client.request=async()=>{calls++;return {code:210021,msg:'not created via developer platform'};};await assert.rejects(()=>f.runtime.configure(f.feishu,'assistant'));assert.equal(f.engine.roles.get('assistant').configurationStatus,'requires_console');await assert.rejects(()=>f.runtime.configure(f.feishu,'assistant'),/开发者后台/);assert.equal(calls,1);});
 
 test('business completion and ownership changes refresh an existing secretary progress card',async t=>{const f=setup(t),task=f.db.putTask({id:randomUUID(),title:'state synchronization',private:true,status:'delivered'}),messageId=await f.runtime.sendCard({...f.runtime.destination('cli_test_primary'),companionTaskId:task.id},taskCard(task,f.engine.roles),'initial-state-card');await f.engine.setTaskState(task.id,'completed');f.runtime.dirty.set(task.id,Date.now()-1000);await f.runtime.flushDirty();let last=f.requests.at(-1);assert.equal(last.path.message_id,messageId);assert.match(last.data.content,/已完成/);await f.engine.roles.handoff(task.id,'life');f.runtime.dirty.set(task.id,Date.now()-1000);await f.runtime.flushDirty();last=f.requests.at(-1);assert.equal(last.path.message_id,messageId);assert.match(last.data.content,/生活助理/);assert.match(last.data.content,/已完成/);});
+
+test('Feishu staffing approval is bound to the original card and idempotent with the workbench',async t=>{
+  const f=setup(t);
+  const task=f.db.putTask({id:randomUUID(),title:'ongoing reading',private:true,status:'idle'});
+  const p=f.engine.roles.propose({name:'阅读协作者',brief:'整理长期阅读笔记',reason:'重复发生的资料整理'},task.id);
+  const dest=f.runtime.destination('cli_test_primary');
+  const source=await f.runtime.sendCard({...dest,staffingProposalId:p.id},null,'real-shape-decision');
+  const issued=JSON.parse(f.requests.at(-1).data.content);
+  assert.match(JSON.stringify(issued),/同意招募/);
+  const confirm={operator:{open_id:'owner'},token:'owner-approval',context:{open_message_id:source,open_chat_id:'chat-one'},
+    action:{value:{action:'staffing_decision',proposalId:p.id,decision:'approve'}}};
+  const other=await f.runtime.sendCard(dest,taskCard(task,f.engine.roles),'unrelated');
+  assert.equal(f.runtime.callback('cli_test_primary',{...confirm,context:{open_message_id:other}}).toast.type,'error');
+  assert.equal(f.runtime.callback('cli_test_primary',{...confirm,operator:{open_id:'stranger'}}).toast.type,'error');
+  const web=f.engine.roles.decide(p.id,'approve');
+  assert.equal(f.runtime.callback('cli_test_primary',confirm).toast.type,'success');
+  f.runtime.callback('cli_test_primary',confirm);
+  await f.runtime.flush();
+  const roles=f.db.roles().filter(r=>r.name==='阅读协作者');
+  assert.equal(roles.length,1);
+  assert.equal(roles[0].id,web.resultRoleId);
+  assert.equal(roles[0].appId,undefined);
+  const update=f.store.db.prepare("SELECT value FROM outbox WHERE id LIKE 'companion-card:staffing:%'").all();
+  assert.equal(update.length,1);
+  const patched=JSON.parse(update[0].value).job;
+  assert.equal(patched.patchMessageId,source);
+  await f.runtime.sendCard(patched,patched.cardPayload,'decision-update');
+  assert.doesNotMatch(f.requests.at(-1).data.content,/同意招募/);
+});
+
+test('continue card selection replies with a toast and keeps the exact task without sending another card',async t=>{
+  const f=setup(t);
+  const task=f.db.putTask({id:randomUUID(),title:'已在飞书的任务',private:true,status:'idle'});
+  const dest={...f.runtime.destination('cli_test_primary'),companionTaskId:task.id};
+  const source=await f.runtime.sendCard(dest,taskCard(task,f.engine.roles),'continue-card');
+  const event={operator:{open_id:'owner'},token:'continue-this',context:{open_message_id:source},
+    action:{value:{action:'continue_task',taskId:task.id}}};
+  assert.match(f.runtime.callback('cli_test_primary',event).toast.content,/直接发补充/);
+  assert.equal(f.runtime.current('cli_test_primary').taskId,task.id);
+  assert.equal(f.db.actions(['done']).length,1);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS count FROM outbox').get().count,0);
+  const forged={...event,token:'different-target',action:{value:{action:'continue_task',taskId:randomUUID()}}};
+  assert.equal(f.runtime.callback('cli_test_primary',forged).toast.type,'error');
+});
+
+test('an old Feishu recruit form uses the stored approval and an assign form needs no content field',async t=>{
+  const f=setup(t);
+  const task=f.db.putTask({id:randomUUID(),title:'老版任务',private:true,status:'idle'});
+  const p=f.engine.roles.propose({name:'长期阅读',brief:'以原提案职责为准',reason:'持续整理阅读'},task.id);
+  const old=await form(f,'recruit',{role:p,proposalId:p.id});
+  const confirm=callback(old.id,old.name,{name:'不同名字',brief:'不同职责'});
+  assert.equal(f.runtime.callback('cli_test_primary',confirm).toast.type,'success');
+  await f.runtime.flush();
+  const accepted=f.engine.roles.proposal(p.id);
+  assert.equal(f.db.role(accepted.resultRoleId).name,p.name);
+  assert.equal(f.db.role(accepted.resultRoleId).brief,p.brief);
+  const assign=await form(f,'assign',{task});
+  assert.equal(f.runtime.callback('cli_test_primary',callback(assign.id,assign.name,{roleId:accepted.resultRoleId})).toast.type,'success');
+  await f.runtime.flush();
+  assert.equal(f.db.task(task.id).role,accepted.resultRoleId);
+});
+
+test('personal Feishu lookup and direct continuation keep the archived task ID and avoid group results',async t=>{
+  const f=setup(t);
+  const userTask=f.db.putTask({id:randomUUID(),title:'旧低换手报告',status:'delivered',private:true,archived:true,createdAt:Date.now()});
+  f.db.putTask({id:randomUUID(),title:'旧低换手报告',status:'delivered',private:false,createdAt:Date.now()});
+  const job={id:'om_user_find',user:'owner',private:true,text:'找今天那个旧低换手报告',chatId:'chat-one'};
+  assert.ok(f.runtime.handleOwned('cli_test_primary',job));
+  await f.runtime.flush();
+  const search=JSON.parse(f.store.db.prepare("SELECT value FROM outbox WHERE id=?").get('companion-card:task-find:om_user_find').value).job.cardPayload;
+  assert.equal(JSON.stringify(search).split(userTask.id).length-1,2);
+  assert.equal(f.store.jobs(['queued']).length,0);
+  assert.ok(f.runtime.handleOwned('cli_test_primary',{...job,id:'om_user_continue',text:'继续今天那个旧低换手报告，增加交易成本说明'}));
+  await f.runtime.flush();
+  assert.equal(f.store.jobs(['queued'])[0].companionTaskId,userTask.id);
+  assert.equal(f.db.task(userTask.id).archived,false);
+  assert.equal(f.db.task(userTask.id).lastRequest,'增加交易成本说明');
+});

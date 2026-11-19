@@ -17,6 +17,8 @@ export function attachBridge({engine,bridge,store,desktop,feishu,normalize,comma
     if(['new','project'].includes(kind)&&!job.newConversation){job.newConversation=true;job.companionTaskId=stableUUID('new-scope:'+job.id);job.scope=`companion:${job.companionTaskId}`;}
     if(job.newConversation){
       if(job.originalScope!==job.scope)store.set(`scope:${job.originalScope}`,{pendingScope:job.scope,companionTaskId:job.companionTaskId,explicit:true,intentAt:job.scopeIntentAt});
+    }else if(job.companionTaskId&&job.lockBinding&&job.sessionThreadId&&kind==='message'){
+      job.scope='thread:'+job.sessionThreadId;
     }else if(kind!=='new'&&kind!=='project'){
       const binding=store.get(`scope:${job.originalScope}`);
       if(binding?.pendingScope){job.scope=binding.pendingScope;job.companionTaskId??=binding.companionTaskId;job.lockBinding=true;}
@@ -51,7 +53,7 @@ export function attachBridge({engine,bridge,store,desktop,feishu,normalize,comma
   replace(bridge,'dispatch',original=>job=>context.run(job,async()=>{
     const persisted=store.db.prepare('SELECT value FROM jobs WHERE id=?').get(job.id);if(persisted)Object.assign(job,JSON.parse(persisted.value));
     const task=engine.taskForJob(job);
-    if(job.companionSuperseded||(job.ownerGeneration&&job.ownerGeneration!==(task?.ownerGeneration??1))||['retiring','retired'].includes(engine.roles.get(job.actorRole??task?.role)?.status)){job.status='done';job.outcome='已取消';job.companionSuperseded=true;originals.save(job);return;}
+    if(job.companionSuperseded||(job.ownerGeneration&&job.ownerGeneration!==(task?.ownerGeneration??1))||!engine.roles.canFinish({...job,actorRole:job.actorRole??task?.role})){job.status='done';job.outcome='已取消';job.companionSuperseded=true;store.save(job);return;}
     const sessionThread=job.sessionThreadId??(job.actorRole&&job.actorRole!==task?.role?engine.db.session(task?.id,job.actorRole)?.threadId:task?.threadId);
     if(sessionThread&&!job.newConversation){job.scope=`thread:${sessionThread}`;job.lockBinding=true;originals.save(job);}
     const parent=originals.jobs(['running']).find(j=>j.scope===job.scope&&j.id!==job.id);
@@ -87,7 +89,7 @@ export function attachBridge({engine,bridge,store,desktop,feishu,normalize,comma
       }
       args={...args};if(job.channel==='local')args.prompt=args.prompt.replace('这是经本机飞书桥接转入的用户请求。','这是经本机伴随工作台转入的用户请求。').replace('进度和最终答复会自动回传当前飞书会话','进度和最终答复会自动保存到本机伴随工作台');if(!args.prompt.includes('<companion_context>'))args.prompt+=engine.context(job);
       if(job.channel==='local')args.prompt=args.prompt.replaceAll('本机飞书桥接','本机伴随工作台').replaceAll('当前飞书会话','当前事项').replaceAll('自动回传当前事项','自动回传工作台');
-      if(name==='create_thread'&&job.companionTaskId){const task=engine.db.task(job.companionTaskId);args.title=`${engine.roles.get(job.actorRole??task?.role)?.name??'秘书'} · ${task?.title??job.title??'新事项'} · ${job.taskTag??''}`;}
+      if(name==='create_thread'&&job.companionTaskId){const task=engine.db.task(job.companionTaskId);args.title=`${engine.roles.get(job.actorRole??task?.role)?.name??'助理'} · ${task?.title??job.title??'新事项'} · ${job.taskTag??''}`;}
       // Retain the source bridge's recovery tag, while using the existing project locally.
       if(args.target?.type==='project'&&args.target.environment?.type==='worktree'&&!job.explicitWorktree)args.target={...args.target,environment:{type:'local'}};
     }
@@ -125,8 +127,8 @@ export function attachBridge({engine,bridge,store,desktop,feishu,normalize,comma
     const action=match[1],argument=(match[2]??'').trim();
     const reply=body=>{store.emit(`companion-command:${job.id}`,{job:{...job,companionUtility:true},text:body});bridge.wake();};
     try{
-      if(action==='/帮助'||action==='/工作台')reply('伴随助手已接入。\n/安装包：取得手机“记一下”APK\n/连接手机：取得一次性配对信息\n/记 内容：登记资料\n/资料 关键词：找资料\n/任务：查看近期事项\n/切换 事项编号或名称：继续同一桌面对话\n/新任务 目标：单独交办\n/助手、/量化、/产品、/生活：直接找伙伴\n电脑工作台可查看完整进展、资料和成果。');
-      else if(action==='/安装包'){const path=join(engine.root,'dist','companion-capture-0.1.0.apk');validFile(path,join(engine.root,'dist'));store.emit(`companion-apk:${job.id}`,{job:{...job,companionUtility:true,cwd:join(engine.root,'dist')},artifact:path});bridge.wake();}
+      if(action==='/帮助'||action==='/工作台')reply('伴随助理已接入。\n/安装包：取得手机“记一下”APK\n/连接手机：取得一次性配对信息\n/记 内容：登记资料\n/资料 关键词：找资料\n/任务：查看近期事项\n/切换 事项编号或名称：继续同一桌面对话\n/新任务 目标：单独交办\n/助手、/量化、/产品、/生活：直接找伙伴\n电脑工作台可查看完整进展、资料和成果。');
+      else if(action==='/安装包'){const path=join(engine.root,'dist','companion-capture-0.2.0.apk');validFile(path,join(engine.root,'dist'));store.emit(`companion-apk:${job.id}`,{job:{...job,companionUtility:true,cwd:join(engine.root,'dist')},artifact:path});bridge.wake();}
       else if(action==='/连接手机'){if(!engine.phonePairing)throw new AppError(503,'手机连接入口正在准备');const pair=engine.phonePairing(argument);reply(`在手机“记一下”的连接页粘贴这条信息：\n\n${pair.code}\n\n十分钟内有效，成功一次后失效。默认需要手机与电脑处于同一Wi-Fi；已使用Tailscale时可发送 /连接手机 Tailscale。`);}
       else if(action==='/记'||action==='记一下'){
         const paths=await originals.attachments(job),files=[];

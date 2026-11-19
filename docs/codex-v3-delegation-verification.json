@@ -1,0 +1,13 @@
+{
+  "status": "delivered",
+  "childStatus": "delivered",
+  "distinctThreads": true,
+  "artifactReady": true,
+  "templateStillTemporary": true,
+  "roleCountUnchanged": true,
+  "actualDesktop": true,
+  "webPreview": true,
+  "foundByArtifactName": true,
+  "bytes": 1446,
+  "sha256": "a30516c349544fc6542750e631b99cb034064285fa7ab06385cbf0fb6c542441"
+}

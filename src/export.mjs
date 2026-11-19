@@ -13,5 +13,6 @@ export function exportData(db,dataDir){
     catch{return {...artifact,path:undefined,unavailable:true};}
   }));
   const manifest={format:'companion-personal-data',version:2,roles:db.roles().map(({id,name,brief,status,generation,createdAt,retiredAt})=>({id,name,brief,status,generation,createdAt,retiredAt})),sessions:tasks.flatMap(t=>db.sessions(t.id)),handoffs:db.sql.prepare("SELECT value FROM kv WHERE key LIKE 'handoff:%' OR key LIKE 'retirement:%'").all().map(r=>JSON.parse(r.value)),exportedAt:new Date().toISOString(),note:'不导出本客户端登录密钥、设备令牌或电脑连接凭证。用户原文完整保留。包含已保存的可见消息，不含尚未读取的桌面历史或厂商内部状态。',captures:exported,tasks,artifacts,memories:db.get('memories',[]),skills:db.get('skills',[]),messages:tasks.flatMap(t=>db.messages(t.id,1000000))};
-  entries.unshift(['companion.json',JSON.stringify(manifest,null,2)],['README.txt','个人资料包 v1\ncompanion.json 包含有范围的记忆、资料、事项和可见对话；materials 是实际附件；artifacts 是已交付的成果快照。\n不包含本客户端认证信息；用户原文不做脱敏。\n']);return zip(entries);
+  manifest.staffing=db.get('role-proposals',[]);
+  entries.unshift(['companion.json',JSON.stringify(manifest,null,2)],['README.txt','个人资料包\ncompanion.json 包含有范围的记忆、资料、事项、人员决定和可见对话；materials 是实际附件；artifacts 是已交付的成果快照。\n不包含本客户端认证信息；用户原文不做脱敏。\n']);return zip(entries);
 }

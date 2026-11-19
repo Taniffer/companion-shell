@@ -1,0 +1,17 @@
+{
+  "actualFeishuMessageAPI": true,
+  "syntheticTemplates": true,
+  "clientClickVerified": false,
+  "cases": [
+    {
+      "template": "staffing",
+      "accepted": true,
+      "code": 0
+    },
+    {
+      "template": "task-lookup",
+      "accepted": true,
+      "code": 0
+    }
+  ]
+}
