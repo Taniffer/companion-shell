@@ -12,6 +12,7 @@ export function taskIntent(input){
   const explicit=value.match(/^\/(找任务|切换)\s+(.+)$/s);
   if(explicit)return {query:explicit[2].trim(),mode:explicit[1]==='切换'?'focus':'find'};
   const continueTask=value.match(/^(?:请)?(?:帮我)?(?:继续|接着)\s*([^，,：:\n]+)[，,：:]\s*([\s\S]+)$/);
+  if(continueTask&&/^(?:这(?:个|件|项)|本次|当前(?:的)?)(?:任务|事)?$/.test(continueTask[1].trim()))return null;
   if(continueTask&&past.test(continueTask[1]))return {query:continueTask[1].trim(),goal:continueTask[2].trim(),mode:'continue'};
   const find=value.match(/^(?:请)?(?:帮我)?(?:找回|找一下|找下|找|查一下|看看)\s*(.+)$/);
   return find&&past.test(find[1])?{query:find[1].trim(),mode:'find'}:null;

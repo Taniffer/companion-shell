@@ -83,8 +83,10 @@ export class Engine {
     job.newConversation=!sessionThread;job.companionSessionCreation=!sessionThread&&!newTask;job.sessionThreadId=sessionThread??null;
     job.private=replyJob?replyJob.private:task.private!==false;
     job.internalCallback=internal;job.requestCaptures=[...captureIds];job.previousRequest=session?.lastUserRequest;
+    job.companionDeliveryId=internal?(task.lastUserJobId??this.db.get(`reply-origin:${task.id}`)?.id??job.id):job.id;
     if(!this.store.insert(job)){const row=this.store.db.prepare('SELECT value FROM jobs WHERE id=?').get(job.id);return row?this.ensureTask(JSON.parse(row.value)):task;}
     this.db.saveRequest(requestId,task.id);
+    if(!internal)this.db.patchTask(task.id,{lastUserJobId:job.id},{touch:false});
     if(!internal)this.db.putSession({taskId:task.id,roleId:role,generation:task.ownerGeneration??1,lastUserRequest:goal,captureIds:selected});
     this.db.message(task.id,{id:`user:${job.id}`,role:internal?'system':'user',text:internal?'专业工作已有结果，助理正在整合。':goal,actorRole:role,channel:replyJob?'feishu':'local'});
     if(parent)this.db.patchTask(parent.id,{waitingChildren:true,summary:'专业工作已安排，结果会汇到这件事。',status:parent.status==='paused'?'paused':'waiting'});

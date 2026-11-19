@@ -1,8 +1,8 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import QRCode from 'qrcode';
 import {randomUUID} from 'node:crypto';
-import {readFileSync,createReadStream} from 'node:fs';
-import {join} from 'node:path';
+import {readFileSync,createReadStream,mkdirSync,writeFileSync,renameSync,rmSync} from 'node:fs';
+import {join,resolve} from 'node:path';
 import {AppError,hash,text,validFile,imageMime} from './util.mjs';
 import {Vault} from './vault.mjs';
 import {taskCard,listCard,formCard,teamCard,staffingCard,foundTasksCard,receiptCard,callbackButton,linkButton} from './feishu-cards.mjs';
@@ -29,7 +29,10 @@ export class FeishuRuntime{
         if(job.cardPayload)return this.sendCard(job,job.cardPayload,args[1]);
         if(!wire.id)return this.sendText(job,args[0],args[1]);
       }
-      if(name==='deliverArtifact'&&job.createNewMessage&&!wire.id)return this.deliverNew(job,args[0],args[1]);
+      if(name==='deliverArtifact'){
+        if(job.companionTaskId&&!job.companionUtility)return this.deliverUnique(job,args[0],original,args[1]);
+        if(job.createNewMessage&&!wire.id)return this.deliverNew(job,args[0],args[1]);
+      }
       if(name==='progress'&&job.private&&job.companionTaskId){const task=this.db.task(job.companionTaskId);if(task){const payload=taskCard(task,this.engine.roles,args[0]);const id=await this.sendCard({...job,patchMessageId:job.progressId},payload,job.id+':progress');job.progressId=id;return;}}
       if(name==='finishProgress'&&job.private&&job.progressId&&job.companionTaskId){const task=this.db.task(job.companionTaskId);if(task)return this.sendCard({...job,patchMessageId:job.progressId},taskCard(task,this.engine.roles),job.id+':finish');}
       if(['reaction','clearReaction'].includes(name)&&(job.sourceMessageId||job.createNewMessage))return;
@@ -51,6 +54,43 @@ export class FeishuRuntime{
   destination(appId,owner=this.owner(appId),sourceMessageId=null,chatId=null){return {botAppId:appId,id:sourceMessageId,sourceMessageId,chatId,user:owner,private:true,channel:'feishu',companionUtility:true};}
   async sendText(job,body,key){const wire=this.wire(job),client=this.client(job),data={msg_type:'text',content:JSON.stringify({text:String(body)}),uuid:uuid(key??randomUUID())};const result=wire.id?await client.client.im.message.reply({path:{message_id:wire.id},data:{...data,reply_in_thread:!!job.topicId}}):await client.client.im.message.create({params:{receive_id_type:job.chatId?'chat_id':'open_id'},data:{...data,receive_id:job.chatId??job.user}});return check(result).message_id;}
   async deliverNew(job,path,key){const file=validFile(path,job.cwd,30*1024*1024),client=this.client(job),image=/\.(png|jpe?g|gif|webp)$/i.test(file.path)&&file.size<10*1024*1024;const uploaded=image?check(await client.client.im.image.create({data:{image_type:'message',image:createReadStream(file.path)}})):check(await client.client.im.file.create({data:{file_type:'stream',file_name:file.name,file:createReadStream(file.path)}}));check(await client.client.im.message.create({params:{receive_id_type:job.chatId?'chat_id':'open_id'},data:{receive_id:job.chatId??job.user,msg_type:image?'image':'file',content:JSON.stringify(image?{image_key:uploaded.image_key}:{file_key:uploaded.file_key}),uuid:uuid(key)}}));}
+  async deliverUnique(job,path,original,outboxKey){
+    const group=job.companionDeliveryId??job.id;
+    const destination=[job.botAppId??this.primaryApp,job.chatId??null,job.user??null,job.topicId??null];
+    const eventKey='companion-delivery-event:'+hash(JSON.stringify([job.companionTaskId,group,destination,job.id,outboxKey??null,resolve(path)]));
+    const root=join(this.engine.dataDir,'artifacts',job.companionTaskId,'delivery');
+    let delivery=this.db.get(eventKey);
+    if(!delivery){
+      const file=validFile(path,job.cwd,30*1024*1024);
+      const bytes=readFileSync(file.path),digest=hash(bytes);
+      const key='companion-delivery:'+hash(JSON.stringify([job.companionTaskId,group,destination,file.name,digest]));
+      const directory=join(root,digest),snapshot=join(directory,file.name);
+      mkdirSync(directory,{recursive:true});
+      let intact=false;
+      try{intact=hash(readFileSync(validFile(snapshot,root).path))===digest;}catch{}
+      if(!intact){
+        const temporary=join(directory,'.'+randomUUID()+'.tmp');
+        try{writeFileSync(temporary,bytes,{flag:'wx',mode:0o600});renameSync(temporary,snapshot);}
+        finally{rmSync(temporary,{force:true});}
+      }
+      delivery={key,snapshot,directory,sha256:digest};
+      this.db.set(eventKey,delivery);
+    }
+    const {key,snapshot,directory,sha256:digest}=delivery;
+    if(this.db.get(key))return;
+    this.deliveries??=new Map();
+    if(this.deliveries.has(key))return this.deliveries.get(key);
+    const pending=(async()=>{
+      try{if(hash(readFileSync(validFile(snapshot,root).path))!==digest)throw new Error('snapshot hash');}
+      catch{throw new AppError(503,'成果快照暂不可用，投递仍保留');}
+      const wire=this.wire({...job,cwd:directory});
+      if(job.createNewMessage&&!wire.id)await this.deliverNew({...job,cwd:directory},snapshot,key);
+      else await original(wire,snapshot,key);
+      this.db.set(key,{sentAt:Date.now(),sha256:digest});
+    })();
+    this.deliveries.set(key,pending);
+    try{await pending;}finally{this.deliveries.delete(key);}
+  }
   async sendCard(job,payload,key){const client=this.client(job),parent=this.wire(job).id;let messageId=job.patchMessageId;
     if(job.staffingProposalId)payload=staffingCard(this.staffingView(job.staffingProposalId));
     if(messageId){check(await client.client.im.message.patch({path:{message_id:messageId},data:{content:JSON.stringify(payload)}}));const issued=this.db.get('feishu-card:'+messageId);if(issued)this.db.set('feishu-card:'+messageId,{...issued,patchedAt:Date.now(),contentHash:hash(JSON.stringify(payload))});return messageId;}

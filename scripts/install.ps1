@@ -41,6 +41,7 @@ $originalMain=[IO.File]::ReadAllText($bridgeMain)
 $config=Get-Content -LiteralPath $bridgeConfig -Raw -Encoding UTF8|ConvertFrom-Json
 $pattern='(?m)^const bridge\s*=\s*new Bridge\([^\r\n]+\);\r?$'
 if(-not $originalMain.Contains('// BEGIN COMPANION_MVP_ADDON') -and -not [regex]::IsMatch($originalMain,$pattern)){throw '现有桥接入口发生变化，未修改原文件；需要更新兼容接入。'}
+& (Join-Path $PSScriptRoot 'stop-tray.ps1') -AppRoot $appRoot
 & (Join-Path $BridgeRoot 'scripts/stop.ps1')
 # Copy the whole personal data set only after all writers are stopped.
 if(Test-Path -LiteralPath $dataRoot){Copy-Item -LiteralPath $dataRoot -Destination (Join-Path $backupRoot 'data') -Recurse -Force}

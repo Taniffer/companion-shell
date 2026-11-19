@@ -8,5 +8,5 @@ try{$check=Invoke-RestMethod -Uri 'http://127.0.0.1:47471/api/health' -TimeoutSe
 if(-not $healthy){& (Join-Path $settings.bridgeRoot 'scripts/start.ps1');for($attempt=0;$attempt -lt 30;$attempt++){try{$check=Invoke-RestMethod -Uri 'http://127.0.0.1:47471/api/health' -TimeoutSec 2;if($check.ok -and $check.service -eq 'companion-workbench'){$healthy=$true;break}}catch{};Start-Sleep -Seconds 1}}
 if(-not $healthy){throw '工作台暂未启动，请运行“诊断伴随.cmd”查看连接。'}
 $tray=Join-Path $settings.appRoot 'scripts/tray.ps1'
-Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$tray+'"')) -WindowStyle Hidden
+Start-Process -FilePath 'powershell.exe' -ArgumentList @('-STA','-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$tray+'"')) -WindowStyle Hidden
 & $settings.nodePath --no-warnings (Join-Path $settings.appRoot 'src/main.mjs')

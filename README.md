@@ -2,7 +2,7 @@
 
 给 Codex Desktop 一个贴近生活的壳：飞书上交代事情，电脑上看任务进展，手机上随手记。默认一位助理。日常分工由助理处理，增减长期人员由你确认一次。
 
-MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.3.0**，以 Windows + Codex Desktop 为主机。
+MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.3.1**，以 Windows + Codex Desktop 为主机。
 
 ![任务看板，隔离验收数据](docs/images/board-v3.png)
 
@@ -19,13 +19,13 @@ MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.3.0**�
 
 ## 下载
 
-- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.3.0/companion-mvp-0.3.0-windows.zip)
-- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.3.0/companion-capture-0.2.0.apk)
-- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.3.0)
+- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.3.1/companion-mvp-0.3.1-windows.zip)
+- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.3.1/companion-capture-0.2.0.apk)
+- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.3.1)
 
 Android 轻记录入口使用 0.2.0 安装包。
 
-本次为预览版；飞书账号授权及部分平台链路仍在实际验收中，具体见验证记录。
+本次为预览版。已通过既有飞书机器人的真实消息、卡片点击、任务续聊与文件回传；独立机器人开通、发布和停用仍受账号及平台权限约束。[0.3.1 用户视角验收报告](docs/0.3.1用户验收报告.md) 区分真实链路、组件测试和未验证项。
 
 ## 在 Windows 使用
 
@@ -56,6 +56,7 @@ npm ci --prefix bridge-kit
 npm run check
 npm test
 npm run test:bridge
+powershell -NoProfile -ExecutionPolicy Bypass -File test/windows-tray-regression.ps1
 npx playwright install chromium
 npm run test:browser
 ```

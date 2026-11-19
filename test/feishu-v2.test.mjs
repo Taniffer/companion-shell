@@ -57,6 +57,76 @@ test('Feishu staffing approval is bound to the original card and idempotent with
   assert.doesNotMatch(f.requests.at(-1).data.content,/同意招募/);
 });
 
+test('automatic artifact relays dedupe within the same user request and keep later explicit deliveries',async t=>{
+  const f=setup(t);
+  const {writeFileSync,readFileSync}=await import('node:fs');
+  const {join}=await import('node:path');
+  const task=f.db.putTask({id:randomUUID(),private:true,cwd:f.dataDir,title:'same result'});
+  const file=join(f.dataDir,'result.html');
+  writeFileSync(file,'<p>ONE_IMMUTABLE_RESULT</p>');
+  const dest={...f.runtime.destination('cli_test_primary','owner','om_origin','chat-one'),
+    companionTaskId:task.id,companionDeliveryId:'one-user-request',companionUtility:false,cwd:f.dataDir};
+  await Promise.all([
+    f.feishu.deliverArtifact({...dest,id:'job-one'},file,'outbox-one'),
+    f.feishu.deliverArtifact({...dest,id:'job-two'},file,'outbox-two')
+  ]);
+  let deliveries=f.calls.filter(c=>c.name==='deliverArtifact');
+  assert.equal(deliveries.length,1);
+  assert.equal(readFileSync(deliveries[0].args[1],'utf8'),'<p>ONE_IMMUTABLE_RESULT</p>');
+  assert.notEqual(deliveries[0].args[1],file);
+  await f.feishu.deliverArtifact({...dest,id:'job-three'},file,'outbox-three');
+  assert.equal(f.calls.filter(c=>c.name==='deliverArtifact').length,1);
+  await f.feishu.deliverArtifact({...dest,id:'later',companionDeliveryId:'later-user-request'},file,'later-outbox');
+  assert.equal(f.calls.filter(c=>c.name==='deliverArtifact').length,2);
+  writeFileSync(file,'<p>NEW_RESULT_VERSION</p>');
+  await f.feishu.deliverArtifact(dest,file,'new-version-outbox');
+  assert.equal(f.calls.filter(c=>c.name==='deliverArtifact').length,3);
+  await f.feishu.deliverArtifact({...dest,companionUtility:true},file,'manual-resend-outbox');
+  assert.equal(f.calls.filter(c=>c.name==='deliverArtifact').length,4);
+});
+
+test('artifact retry keeps its persisted bytes and delivery key after a lost receipt and source deletion',async t=>{
+  const f=setup(t);
+  const {writeFileSync,readFileSync,unlinkSync}=await import('node:fs');
+  const {join}=await import('node:path');
+  const task=f.db.putTask({id:randomUUID(),private:true,cwd:f.dataDir,title:'retry result'});
+  const file=join(f.dataDir,'retry.html');
+  writeFileSync(file,'VERSION_ONE');
+  const job={...f.runtime.destination('cli_test_primary','owner','om_origin','chat-one'),id:'one-job',
+    companionTaskId:task.id,companionDeliveryId:'one-user-request',companionUtility:false,cwd:f.dataDir};
+  const attempts=[];
+  const send=async(wire,snapshot,key)=>{attempts.push({bytes:readFileSync(snapshot,'utf8'),key});if(attempts.length===1)throw new Error('lost receipt');};
+  await assert.rejects(()=>f.runtime.deliverUnique(job,file,send,'one-outbox'),/lost receipt/);
+  writeFileSync(file,'VERSION_TWO');
+  unlinkSync(file);
+  f.runtime.close();
+  const restarted=new FeishuRuntime({engine:f.engine,feishu:f.feishu,normalize:()=>null});
+  t.after(()=>restarted.close());
+  await restarted.deliverUnique(job,file,send,'one-outbox');
+  await restarted.deliverUnique(job,file,send,'one-outbox');
+  assert.equal(attempts.length,2);
+  assert.deepEqual(attempts.map(a=>a.bytes),['VERSION_ONE','VERSION_ONE']);
+  assert.equal(attempts[0].key,attempts[1].key);
+});
+
+test('a partial staged artifact is repaired before first delivery and is never sent on retry',async t=>{
+  const f=setup(t);
+  const {mkdirSync,writeFileSync,readFileSync}=await import('node:fs');
+  const {join}=await import('node:path');
+  const task=f.db.putTask({id:randomUUID(),private:true,cwd:f.dataDir,title:'staged result'});
+  const file=join(f.dataDir,'staged.html'),bytes='COMPLETE_VERSION';
+  const directory=join(f.dataDir,'artifacts',task.id,'delivery',hash(bytes)),snapshot=join(directory,'staged.html');
+  mkdirSync(directory,{recursive:true});writeFileSync(snapshot,'PARTIAL');writeFileSync(file,bytes);
+  const job={...f.runtime.destination('cli_test_primary','owner','om_origin','chat-one'),id:'staged-job',
+    companionTaskId:task.id,companionDeliveryId:'one-user-request',companionUtility:false,cwd:f.dataDir};
+  let attempts=0;
+  const send=async(wire,path)=>{attempts++;assert.equal(readFileSync(path,'utf8'),bytes);throw new Error('offline');};
+  await assert.rejects(()=>f.runtime.deliverUnique(job,file,send,'staged-outbox'),/offline/);
+  writeFileSync(snapshot,'PARTIAL_AGAIN');
+  await assert.rejects(()=>f.runtime.deliverUnique(job,file,send,'staged-outbox'),/成果快照暂不可用/);
+  assert.equal(attempts,1);
+});
+
 test('continue card selection replies with a toast and keeps the exact task without sending another card',async t=>{
   const f=setup(t);
   const task=f.db.putTask({id:randomUUID(),title:'已在飞书的任务',private:true,status:'idle'});
@@ -70,6 +140,21 @@ test('continue card selection replies with a toast and keeps the exact task with
   assert.equal(f.store.db.prepare('SELECT count(*) AS count FROM outbox').get().count,0);
   const forged={...event,token:'different-target',action:{value:{action:'continue_task',taskId:randomUUID()}}};
   assert.equal(f.runtime.callback('cli_test_primary',forged).toast.type,'error');
+});
+
+test('after choosing a task, continue this task goes to that conversation rather than a historical search',async t=>{
+  const f=setup(t);
+  const task=f.db.putTask({id:randomUUID(),title:'chosen task',private:true,status:'idle',threadId:'native-chosen'});
+  f.runtime.select('cli_test_primary',task,'assistant');
+  for(const phrase of ['继续这个任务，补上结果','接着这件事：更新原来的 HTML','继续当前任务，保留391']){
+    const id=randomUUID(),job={id,text:phrase,private:true,user:'owner',chatId:'chat-one',scope:'feishu:owner',message:{create_time:String(Date.now())}};
+    assert.equal(f.runtime.handleOwned('cli_test_primary',job),true);
+    const queued=JSON.parse(f.store.db.prepare('SELECT value FROM jobs WHERE id=?').get(id).value);
+    assert.equal(queued.companionTaskId,task.id);
+    assert.equal(queued.text,phrase);
+  }
+  assert.equal(f.db.tasks().length,1);
+  assert.equal(f.db.actions().length,0);
 });
 
 test('an old Feishu recruit form uses the stored approval and an assign form needs no content field',async t=>{

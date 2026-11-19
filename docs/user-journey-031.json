@@ -1,0 +1,93 @@
+{
+  "date": "2026-11-20",
+  "version": "0.3.1",
+  "windows": {
+    "reopenRestoresDraft": true,
+    "successfulSaveClearsDraft": true,
+    "actualTextEventPersisted": true,
+    "actualButtonSavedToRealBackend": true,
+    "openedAndFocused": true,
+    "interaction": "component event integration, not external mouse automation",
+    "actualWinForms": true,
+    "failedSaveKeepsEditor": true
+  },
+  "web": {
+    "searchedByArtifactFilename": true,
+    "actualHtmlIframePreview": true,
+    "webCompletionPersisted": true,
+    "directProfessional": {
+      "sameNativeConversation": true,
+      "actualProfessionalReply": true
+    },
+    "continuedSameAssistantConversation": true,
+    "nativeFeishuContinuationReturnedActualFile": true,
+    "originalWindowsCaptureAttached": true
+  },
+  "android": {
+    "environment": "official Android emulator API 35, unchanged 0.2.0 APK, actual installed Windows 0.3.1 coordinator",
+    "physicalPhoneTested": false,
+    "actualOverlayAndSharesheet": true,
+    "actualRotationPreservedImage": true,
+    "offlineAbsentBeforeReconnect": true,
+    "cases": {
+      "floating": {
+        "syncedExactlyOnce": true,
+        "source": "android-floating",
+        "attachments": 0
+      },
+      "image": {
+        "syncedExactlyOnce": true,
+        "source": "android-share",
+        "attachments": 1,
+        "actualPngHashMatches": true
+      },
+      "offline": {
+        "syncedExactlyOnce": true,
+        "source": "android-share",
+        "attachments": 0
+      },
+      "link": {
+        "originalTextAndFullUrlPreserved": true,
+        "source": "android-share"
+      }
+    }
+  },
+  "mobileFeishuCodex": {
+    "source": "genuine native Feishu message, genuine Android capture, actual Codex delegation and official Feishu file readback",
+    "receivedUserMessage": true,
+    "nativeAssistantConversation": true,
+    "independentProfessionalConversation": true,
+    "professionalStatus": "delivered",
+    "assistantStatus": "delivered",
+    "htmlSnapshots": 1,
+    "actualFileMessages": 1,
+    "files": [
+      {
+        "sha256": "37ef17739dccd6e72a9f1d613970d8db5e4cc1128407c5630f6165d3894e8f4a",
+        "bytes": 955,
+        "matchesSnapshot": true,
+        "hasMobileSource": true,
+        "hasProductResult": true,
+        "hasFinalMarker": true
+      }
+    ]
+  },
+  "staffing": {
+    "actualNativeFeishuRecruitApproval": true,
+    "automaticallyAssignedFirstGoal": true,
+    "actualWebRetirementConfirmation": true,
+    "roleRetired": true,
+    "taskTransferredBackToAssistant": true,
+    "formerProfessionalHistoryReadable": true,
+    "independentPlatformBotBound": false
+  },
+  "connectionCard": {
+    "realClientClicked": true,
+    "callbackVerified": true
+  },
+  "testCleanup": {
+    "archivedOnlyNamedQaTasks": 6,
+    "testRoleRetired": true
+  },
+  "physicalPhoneTested": false
+}
