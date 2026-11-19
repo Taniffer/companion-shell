@@ -12,7 +12,7 @@ const check=r=>{if(r.code&&r.code!==0){const error=new Error('飞书操作尚未
 const uuid=value=>hash(value).slice(0,32);
 const sdkLogger={error(){},warn(){},info(){},debug(){},trace(){}};
 export class FeishuRuntime{
-  constructor({engine,feishu,normalize,log=()=>{}}){Object.assign(this,{engine,primary:feishu,normalize,log});this.db=engine.db;this.store=engine.store;this.clients=new Map();this.originals=new Map();this.controllers=new Map();this.vault=new Vault(join(engine.dataDir,'secrets'));this.primaryApp=engine.config.feishu.appId;this.clients.set(this.primaryApp,feishu);this.remember(feishu);this.flushRunning=false;this.dirty=new Map();this.closed=false;}
+  constructor({engine,feishu,normalize,log=()=>{},registerApp=lark.registerApp}){Object.assign(this,{engine,primary:feishu,normalize,log,registerApp});this.db=engine.db;this.store=engine.store;this.clients=new Map();this.originals=new Map();this.controllers=new Map();this.vault=new Vault(join(engine.dataDir,'secrets'));this.primaryApp=engine.config.feishu.appId;this.clients.set(this.primaryApp,feishu);this.remember(feishu);this.flushRunning=false;this.dirty=new Map();this.closed=false;}
   quietClient(client){for(const target of [client.client,client.ws])if(target?.logger){if(target.logger.logger)target.logger.logger=sdkLogger;else target.logger=sdkLogger;}}
   remember(client){this.quietClient(client);const methods={};for(const name of ['reply','progress','finishProgress','reaction','clearReaction','attachments','deliverArtifact','topicContext'])methods[name]=client[name].bind(client);this.originals.set(client,methods);}
   roleForApp(appId){return appId===this.primaryApp?this.engine.roles.get('assistant'):this.db.roles().find(r=>r.appId===appId);}
@@ -42,7 +42,7 @@ export class FeishuRuntime{
     this.engine.roles.patch('assistant',{appId:this.primaryApp,ownerOpenId:this.engine.owner(),platformStatus:this.engine.roles.get('assistant')?.platformStatus??'messaging_ready'});
     this.timer=setInterval(()=>{this.flush().catch(e=>this.safeError('action_flush',e));this.flushDirty().catch(e=>this.safeError('card_update',e));},1500);this.timer.unref();
     for(const action of this.db.actions(['running']))this.db.putAction({...action,status:'pending'});
-    for(const role of this.db.roles())if(role.id!=='assistant'&&role.appId&&role.secretRef)this.connectRole(role.id).catch(e=>this.engine.roles.patch(role.id,{provisionError:'飞书连接待恢复（'+(e.code??'network')+'）'}));
+    for(const role of this.db.roles())if(role.id!=='assistant'&&role.appId&&role.secretRef&&!['disabled','disabled_console_confirmed'].includes(role.platformStatus))this.connectRole(role.id).catch(e=>this.engine.roles.patch(role.id,{provisionError:'飞书连接待恢复（'+(e.code??'network')+'）'}));
     return this;
   }
   safeError(event,error){this.log(event,{code:error.code??error.status??'unknown'});}
@@ -52,6 +52,13 @@ export class FeishuRuntime{
     'card.action.trigger':event=>this.callback(appId,event)
   });await client.ws.start({eventDispatcher:dispatcher});}
   destination(appId,owner=this.owner(appId),sourceMessageId=null,chatId=null){return {botAppId:appId,id:sourceMessageId,sourceMessageId,chatId,user:owner,private:true,channel:'feishu',companionUtility:true};}
+  retirementReply(task,formerRole){
+    const previous=this.db.get('reply-origin:'+task.id);
+    if(task.private!==true||previous?.private!==true||previous.channel!=='feishu'||!formerRole?.appId||formerRole.appId===this.primaryApp||previous.botAppId!==formerRole.appId||!formerRole.ownerOpenId||previous.user!==formerRole.ownerOpenId)return null;
+    const owner=this.owner(this.primaryApp);
+    if(!owner)throw new AppError(409,'请先绑定助理的飞书会话，再接回独立机器人的私人任务');
+    return {previous,next:{...this.destination(this.primaryApp,owner),id:previous.id,scope:'feishu:'+this.primaryApp+':'+owner,companionTaskId:task.id,actorRole:'assistant',companionUtility:false,createNewMessage:true}};
+  }
   async sendText(job,body,key){const wire=this.wire(job),client=this.client(job),data={msg_type:'text',content:JSON.stringify({text:String(body)}),uuid:uuid(key??randomUUID())};const result=wire.id?await client.client.im.message.reply({path:{message_id:wire.id},data:{...data,reply_in_thread:!!job.topicId}}):await client.client.im.message.create({params:{receive_id_type:job.chatId?'chat_id':'open_id'},data:{...data,receive_id:job.chatId??job.user}});return check(result).message_id;}
   async deliverNew(job,path,key){const file=validFile(path,job.cwd,30*1024*1024),client=this.client(job),image=/\.(png|jpe?g|gif|webp)$/i.test(file.path)&&file.size<10*1024*1024;const uploaded=image?check(await client.client.im.image.create({data:{image_type:'message',image:createReadStream(file.path)}})):check(await client.client.im.file.create({data:{file_type:'stream',file_name:file.name,file:createReadStream(file.path)}}));check(await client.client.im.message.create({params:{receive_id_type:job.chatId?'chat_id':'open_id'},data:{receive_id:job.chatId??job.user,msg_type:image?'image':'file',content:JSON.stringify(image?{image_key:uploaded.image_key}:{file_key:uploaded.file_key}),uuid:uuid(key)}}));}
   async deliverUnique(job,path,original,outboxKey){
@@ -131,8 +138,9 @@ export class FeishuRuntime{
   }
   select(app,task,actorRole=this.roleForApp(app)?.id){if(!this.owner(app))throw new AppError(409,'这只机器人尚未绑定用户，请先完成绑定');if(actorRole!=='assistant'&&task.role!==actorRole)throw new AppError(403,'这项任务已由其他角色接手，请找助理');this.db.set('feishu-current:'+app+':'+this.owner(app),{taskId:task.id,actorRole,at:Date.now()});}
   form(type,app,options={}){const token=options.formToken??randomUUID().replaceAll('-','');if(!this.db.get('feishu-form:'+token))this.db.set('feishu-form:'+token,{type,appId:app,owner:this.owner(app),taskId:options.task?.id,version:options.task?.actionVersion??null,roleId:options.role?.id,proposalId:options.proposalId,draftId:options.draftId,expires:Date.now()+14*86400000});return formCard(type,token,{...options,roles:this.engine.roles.list()});}
-  menu(app,data){const e=data.event??data,operator=e.operator?.operator_id?.open_id??e.operator?.open_id;if(!this.owner(app)||operator!==this.owner(app))return;this.engine.roles.patch(this.roleForApp(app).id,{menuStatus:'verified'});const key=e.event_key;const action=key==='capture'?'capture':key==='team'?'team':key==='new_task'?'new_task':key==='current'?'current':key==='secretary'?'secretary':'list';this.persist({id:'menu:'+app+':'+(data.event_id??data.header?.event_id??hash(JSON.stringify(e))),appId:app,operator,action,payload:{},dest:this.destination(app,operator),status:'pending'});}
+  menu(app,data){const e=data.event??data,operator=e.operator?.operator_id?.open_id??e.operator?.open_id;if(this.roleForApp(app)?.status==='retired'||!this.owner(app)||operator!==this.owner(app))return;this.engine.roles.patch(this.roleForApp(app).id,{menuStatus:'verified',menuWarning:null});const key=e.event_key;const action=key==='capture'?'capture':key==='team'?'team':key==='new_task'?'new_task':key==='current'?'current':key==='secretary'?'secretary':'list';this.persist({id:'menu:'+app+':'+(data.event_id??data.header?.event_id??hash(JSON.stringify(e))),appId:app,operator,action,payload:{},dest:this.destination(app,operator),status:'pending'});}
   callback(app,data){try{const e=data.event??data,operator=e.operator?.open_id??e.operator?.operator_id?.open_id;if(!this.owner(app)||operator!==this.owner(app))throw new AppError(403,'当前用户没有操作这个个人助理的权限');
+    if(this.roleForApp(app)?.status==='retired')throw new AppError(409,'工作已并回助理，请从助理会话继续');
     const source=e.context?.open_message_id??e.message_id,chat=e.context?.open_chat_id??e.chat_id,issued=this.db.get('feishu-card:'+source);if(!issued||issued.appId!==app||issued.owner!==operator||issued.createdAt<Date.now()-14*86400000)throw new AppError(409,'卡片已失效，请从菜单获取最新卡片');
     let payload=e.action?.value??{},action=payload.action,form=null;if(typeof payload==='string')payload=JSON.parse(payload);action=payload.action;
     if(e.action?.name?.startsWith('submit_')){const token=e.action.name.slice(7);form=this.db.get('feishu-form:'+token);if(!form||form.appId!==app||form.owner!==operator||form.expires<Date.now())throw new AppError(409,'表单已失效，请重新打开');action='form';payload={...form,formToken:token,values:e.action.form_value??{}};}
@@ -271,7 +279,8 @@ export class FeishuRuntime{
     const current=this.current(app);
     const task=this.engine.enqueue({goal:input,taskId:current?.taskId,role:current?.actorRole??role.id,requestId:job.id,replyJob:job});this.select(app,task,current?.actorRole??role.id);return true;
   }
-  async receiveRole(roleId,event){const role=this.engine.roles.get(roleId),client=this.clients.get(role.appId),job=this.normalize(event,client.botId);if(!job||!job.private||job.topicId)return;job.botAppId=role.appId;
+  async receiveRole(roleId,event){const role=this.engine.roles.get(roleId);if(!role||this.stoppingApps?.has(role.appId)||['disabled','disabled_console_confirmed'].includes(role.platformStatus))return;
+    const client=this.clients.get(role.appId);if(!client)return;const job=this.normalize(event,client.botId);if(!job||!job.private||job.topicId)return;job.botAppId=role.appId;
     if(!role.ownerOpenId){if(role.pairing?.expires>Date.now()&&hash(job.text.trim())===role.pairing.hash){this.engine.roles.patch(roleId,{ownerOpenId:job.user,pairCode:null,pairing:null,boundAt:Date.now(),platformStatus:role.platformStatus==='binding'?'messaging_ready':role.platformStatus});this.queueCard(this.destination(role.appId,job.user,job.id,job.chatId),receiptCard('已绑定你的独立助理','可以直接交代任务，也能随时回到助理。',[callbackButton('我的任务','list')]),'role-bound:'+job.id);}return;}
     if(job.user!==role.ownerOpenId)return;
     if(['retiring','retired'].includes(role.status)){this.queueCard(this.destination(role.appId,job.user,job.id,job.chatId),receiptCard(role.status==='retired'?'工作已并回助理':'助理正在接回工作','原任务与资料保留。',[linkButton('回到助理','https://applink.feishu.cn/client/bot/open?appId='+this.primaryApp)]),'retired-message:'+job.id);return;}
@@ -280,40 +289,98 @@ export class FeishuRuntime{
   taskChanged(taskId,job){if(job?.private&&job.channel!=='local'&&job.user===this.owner(job.botAppId??this.primaryApp)&&!job.companionSuperseded){try{const task=this.db.task(taskId),saved=this.db.get('feishu-current:'+(job.botAppId??this.primaryApp)+':'+job.user);if(task&&(!saved||(job.scopeIntentAt??0)>=(saved.at??0)))this.select(job.botAppId??this.primaryApp,task,job.actorRole??task.role);}catch{}}
     this.dirty.set(taskId,Date.now());}
   async flushDirty(){for(const [taskId,time]of this.dirty){if(Date.now()-time<500)continue;this.dirty.delete(taskId);const task=this.db.task(taskId);if(!task)continue;const rows=this.db.sql.prepare("SELECT key,value FROM kv WHERE key LIKE 'feishu-card:%'").all();for(const row of rows){const issued=JSON.parse(row.value);if((this.roleForApp(issued.appId)?.id!=='assistant'&&this.roleForApp(issued.appId)?.id!==task.role)||issued.taskId!==taskId||issued.createdAt<Date.now()-13*86400000||!this.clients.has(issued.appId))continue;try{await this.sendCard({...this.destination(issued.appId,issued.owner),patchMessageId:issued.messageId},taskCard(task,this.engine.roles),'refresh:'+issued.messageId);}catch(error){this.safeError('card_refresh_failed',error);}}}}
+  validateProvisionApp(roleId,appId,expectedAppId){
+    const current=this.engine.roles.get(roleId);
+    const occupied=this.db.roles().some(r=>r.id!==roleId&&r.appId===appId);
+    if(!appId||!current||(expectedAppId&&expectedAppId!==appId)||(current.appId&&current.appId!==appId)||
+      (roleId==='assistant'?appId!==this.primaryApp:appId===this.primaryApp)||occupied){
+      const error=new Error('这只机器人已属于其他角色，或与本次开通目标不同。请为新角色创建独立机器人。');
+      error.code='application_conflict';throw error;
+    }
+  }
   provision(roleId){const role=this.engine.roles.get(roleId);if(!role||['retired','retiring'].includes(role.status))throw new AppError(404,'找不到活动角色');if(role.configurationStatus==='requires_console')throw new AppError(409,'这只应用的创建渠道不支持自动配置，请在开放平台完成配置或绑定后台创建的应用；现有资料会保留。');if(this.controllers.has(roleId))return {roleId,status:'awaiting_confirmation'};const controller=new AbortController();this.controllers.set(roleId,controller);this.engine.roles.patch(roleId,{registrationMessage:role.registrationStartedAt&&!role.appId?'上次开通结果待核实，可选择已有应用继续':'正在准备飞书确认页面',registrationStartedAt:role.registrationStartedAt??Date.now(),provisionError:null});
-    lark.registerApp({source:'companion',...(role.appId?{appId:role.appId}:{createOnly:!role.registrationStartedAt}),signal:controller.signal,appPreset:{name:role.name,desc:role.brief.slice(0,200)},addons:{scopes:{tenant:['im:message:send_as_bot','im:message.p2p_msg:readonly','im:message:readonly','im:resource','application:application:patch']},events:{items:{tenant:['im.message.receive_v1','application.bot.menu_v6']}},callbacks:{items:['card.action.trigger']}},onQRCodeReady:info=>this.engine.roles.patch(roleId,{registrationUrl:info.url,registrationExpires:Date.now()+info.expireIn*1000,registrationMessage:'请用飞书扫码或打开链接确认开通'}),onStatusChange:()=>{}}).then(async result=>{
+    this.registerApp({source:'companion',...(role.appId?{appId:role.appId}:{createOnly:!role.registrationStartedAt}),signal:controller.signal,appPreset:{name:role.name,desc:role.brief.slice(0,200)},addons:{scopes:{tenant:['im:message:send_as_bot','im:message.p2p_msg:readonly','im:message:readonly','im:resource','application:application:patch']},events:{items:{tenant:['im.message.receive_v1','application.bot.menu_v6']}},callbacks:{items:['card.action.trigger']}},onQRCodeReady:info=>this.engine.roles.patch(roleId,{registrationUrl:info.url,registrationExpires:Date.now()+info.expireIn*1000,registrationMessage:'请用飞书扫码或打开链接确认开通'}),onStatusChange:()=>{}}).then(async result=>{
+      this.validateProvisionApp(roleId,result.client_id,role.appId);
       if(roleId==='assistant'){this.engine.roles.patch(roleId,{registrationUrl:null,registrationMessage:'增量配置已确认，正在核验连接',provisionError:null});try{await this.configure(this.primary,roleId);}catch(error){this.engine.roles.patch(roleId,{provisionError:'请在开放平台检查菜单、长连接与卡片回调，随后发布生效（'+(error.code??'configuration')+'）'});}return;}
       const appId=result.client_id;if(!/^cli_[a-zA-Z0-9]+$/.test(appId??'')||!result.client_secret)throw new Error('应用创建结果不完整');const secretRef=this.vault.put(appId,result.client_secret);const current=this.engine.roles.get(roleId);if(['retired','retiring'].includes(current?.status)){this.engine.roles.patch(roleId,{appId,secretRef,registrationUrl:null,registrationMessage:'角色已交接，新建平台入口待核验停用。',platformStatus:'disable_pending'});if(current.status==='retired')this.disableRole(roleId).catch(()=>{});return;}const pairCode=randomUUID().slice(0,8);this.engine.roles.patch(roleId,{appId,secretRef,registrationCompletedAt:Date.now(),registrationUrl:null,registrationMessage:null,pairCode,pairing:{hash:hash('绑定 '+pairCode),expires:Date.now()+24*3600000},platformStatus:'binding',launchLink:'https://applink.feishu.cn/client/bot/open?appId='+appId});await this.connectRole(roleId);const client=this.clients.get(appId);try{await this.configure(client,roleId);}catch(error){this.engine.roles.patch(roleId,{provisionError:'应用已创建；部分配置或发布需在开放平台核验（'+(error.code??'configuration')+'）'});}
-    }).catch(error=>{if(['retired','retiring'].includes(this.engine.roles.get(roleId)?.status)){this.engine.roles.patch(roleId,{registrationUrl:null,registrationMessage:'角色已交接，开通流程已停止。'});return;}this.engine.roles.patch(roleId,{registrationUrl:null,provisionError:error.code==='access_denied'?'这次开通未确认，可以稍后继续。':'开通尚未完成，可重试（'+(error.code??'network')+'）'});this.safeError('provision_failed',error);}).finally(()=>this.controllers.delete(roleId));return {roleId,status:'preparing'};
+    }).catch(error=>{if(['retired','retiring'].includes(this.engine.roles.get(roleId)?.status)){this.engine.roles.patch(roleId,{registrationUrl:null,registrationMessage:'角色已交接，开通流程已停止。'});return;}this.engine.roles.patch(roleId,{registrationUrl:null,provisionError:error.code==='application_conflict'?error.message:error.code==='access_denied'?'这次开通未确认，可以稍后继续。':'开通尚未完成，可重试（'+(error.code??'network')+'）'});this.safeError('provision_failed',error);}).finally(()=>this.controllers.delete(roleId));return {roleId,status:'preparing'};
   }
   async qr(roleId){const role=this.engine.roles.get(roleId);if(!role?.registrationUrl||role.registrationExpires<Date.now())throw new AppError(404,'确认链接已过期，请重新开通');return QRCode.toBuffer(role.registrationUrl,{type:'png',width:330,margin:2,errorCorrectionLevel:'M'});}
   cancelProvision(roleId){this.controllers.get(roleId)?.abort();}
+  async configureRole(roleId){
+    const role=this.engine.roles.get(roleId);
+    if(!role?.appId||role.status!=='active')throw new AppError(409,'请先连接一只活动角色的独立机器人');
+    this.validateProvisionApp(roleId,role.appId,role.appId);
+    if(roleId!=='assistant')await this.connectRole(roleId);
+    const client=this.clients.get(role.appId);
+    if(!client)throw new AppError(503,'机器人连接尚未恢复');
+    return this.configure(client,roleId);
+  }
+  async configureAbility(client,roleId,menus){
+    const role=this.engine.roles.get(roleId),url='/open-apis/application/v7/applications/'+role.appId+'/ability';
+    const basic=()=>client.client.request({method:'PATCH',url,data:{bot:{enable:true}}}).then(check);
+    if(['requires_console','verified'].includes(role.menuStatus)){await basic();return;}
+    try{
+      check(await client.client.request({method:'PATCH',url,data:{bot:{enable:true,bot_menu_enable:true,bot_menu_display_strategy:1,bot_menus:menus.map(([event_key,default_name],i)=>({menu_id:'companion_'+event_key,default_name,sort:i+1,menu_content_type:2,event_key}))}}}));
+      this.engine.roles.patch(roleId,{menuStatus:'configured',menuWarning:null});
+    }catch(error){
+      if(Number(error.response?.data?.code??error.code)!==210011)throw error;
+      await basic();
+      this.engine.roles.patch(roleId,{menuStatus:'requires_console',menuWarning:'这只机器人的菜单未通过平台校验，可在飞书后台配置；消息和任务可以直接使用。'});
+    }
+  }
   async configure(client,roleId){const role=this.engine.roles.get(roleId),appId=role.appId;if(role.configurationStatus==='requires_console')throw new AppError(409,'该应用需要开发者后台配置，不再自动重试');try{
     const menus=roleId==='assistant'?[['list','我的任务'],['capture','记一下'],['new_task','交代一件事']]:[['current','当前任务'],['list','我的任务'],['secretary','找助理']];
-    check(await client.client.request({method:'PATCH',url:'/open-apis/application/v7/applications/'+appId+'/ability',data:{bot:{enable:true,bot_menu_enable:true,bot_menu_display_strategy:1,bot_menus:menus.map(([event_key,default_name],i)=>({menu_id:'companion_'+event_key,default_name,sort:i+1,menu_content_type:2,event_key}))}}}));this.engine.roles.patch(roleId,{menuStatus:'configured'});
+    await this.configureAbility(client,roleId,menus);
     check(await client.client.request({method:'PATCH',url:'/open-apis/application/v7/applications/'+appId+'/config',data:{event:{subscription_type:'websocket',add_events:['im.message.receive_v1','application.bot.menu_v6']},callback:{callback_type:'websocket',add_callbacks:['card.action.trigger']}}}));this.engine.roles.patch(roleId,{callbackStatus:'configured'});
     const result=check(await client.client.request({method:'POST',url:'/open-apis/application/v7/applications/'+appId+'/publish',data:{remark:'伴随个人助理：启用机器人消息、菜单与交互卡片。',changelog:'配置长连接消息接收、原生卡片交互与角色入口。',mobile_default_ability:'bot',pc_default_ability:'bot'}}));this.engine.roles.patch(roleId,{configurationStatus:'submitted',platformStatus:'publish_submitted',versionId:result.version_id??null,registrationMessage:'已提交发布，等待平台生效和真实收发核验',provisionError:null});return result;
   }catch(error){error.code=error.response?.data?.code??error.code;const unsupported=[210021,210015,210043,210035,210001].includes(Number(error.code));this.engine.roles.patch(roleId,{configurationStatus:unsupported?'requires_console':'incomplete',provisionError:unsupported?'这只应用的创建渠道不支持自动配置，请在开发者后台完成菜单、回调和发布，或绑定后台创建的应用。':'飞书配置尚未生效，请确认应用配置权限与发布状态（'+(error.code??'network')+'）'});throw error;}}
   async connectRole(roleId){const role=this.engine.roles.get(roleId);if(!role?.appId||!role.secretRef)return;if(this.clients.has(role.appId))return;const client=new this.primary.constructor({appId:role.appId},this.vault.get(role.secretRef));this.quietClient(client);await client.identity();this.remember(client);this.clients.set(role.appId,client);try{await this.startClient(client,role.appId,event=>this.receiveRole(roleId,event));}catch(error){this.clients.delete(role.appId);client.close();throw error;}}
-  async bindExisting(roleId,input){if(['retired','retiring'].includes(this.engine.roles.get(roleId)?.status))throw new AppError(409,'角色已停止接单，不能重新绑定');const appId=text(input.appId,100),secret=text(input.secret,200);if(!/^cli_[a-zA-Z0-9]+$/.test(appId)||!secret)throw new AppError(400,'请提供完整的应用信息');if([...this.db.roles()].some(r=>r.appId===appId&&r.id!==roleId))throw new AppError(409,'这只机器人已属于其他角色');if(this.clients.has(appId)&&appId!==this.primaryApp){this.clients.get(appId).close();this.clients.delete(appId);}const secretRef=this.vault.put(appId,secret),pairCode=randomUUID().slice(0,8);this.engine.roles.patch(roleId,{appId,secretRef,ownerOpenId:null,pairCode,pairing:{hash:hash('绑定 '+pairCode),expires:Date.now()+24*3600000},launchLink:'https://applink.feishu.cn/client/bot/open?appId='+appId,platformStatus:'binding'});await this.connectRole(roleId);return {roleId,status:'awaiting_binding'};}
+  async bindExisting(roleId,input){if(['retired','retiring'].includes(this.engine.roles.get(roleId)?.status))throw new AppError(409,'角色已停止接单，不能重新绑定');const appId=text(input.appId,100),secret=text(input.secret,200);if(!/^cli_[a-zA-Z0-9]+$/.test(appId)||!secret)throw new AppError(400,'请提供完整的应用信息');if([...this.db.roles()].some(r=>r.appId===appId&&r.id!==roleId))throw new AppError(409,'这只机器人已属于其他角色');if(this.clients.has(appId)&&appId!==this.primaryApp){this.clients.get(appId).close();this.clients.delete(appId);}const secretRef=this.vault.put(appId,secret),pairCode=randomUUID().slice(0,8);this.engine.roles.patch(roleId,{appId,secretRef,ownerOpenId:null,pairCode,pairing:{hash:hash('绑定 '+pairCode),expires:Date.now()+24*3600000},launchLink:'https://applink.feishu.cn/client/bot/open?appId='+appId,platformStatus:'binding',configurationStatus:'incomplete',provisionError:null,menuStatus:null,callbackStatus:null,registrationUrl:null,registrationMessage:null});this.db.set('feishu-check-role:'+roleId,null);await this.connectRole(roleId);return {roleId,status:'awaiting_binding'};}
   async disableRole(roleId){
     const role=this.engine.roles.get(roleId);
     if(!role?.appId)return {ok:true,status:'not_bound'};
     if(role.id==='assistant'||role.appId===this.primaryApp||role.status!=='retired')throw new AppError(409,'先完成独立角色的工作交接');
-    if(role.platformStatus==='disabled')return {ok:true,status:'disabled'};
+    if(['disabled','disabled_console_confirmed'].includes(role.platformStatus))return {ok:true,status:role.platformStatus};
+    if(this.stoppingApps?.has(role.appId))throw new AppError(409,'这只飞书入口正在停用');
+    (this.stoppingApps??=new Set()).add(role.appId);
     try{
+      this.requireDelivered(role.appId);
+      const permissions=check(await this.primary.client.request({method:'GET',url:'/open-apis/application/v6/scopes'}));
+      if(!Array.isArray(permissions.scopes))throw new AppError(503,'暂时无法核实飞书停用权限');
+      if(!permissions.scopes.some(s=>s.scope_name==='admin:app.enable:write'&&s.grant_status===1&&s.scope_type!=='user')){
+        const error=new AppError(403,'助理尚未获得启用和停用应用的权限');error.code='app_management_scope_required';throw error;
+      }
+      this.requireDelivered(role.appId);
       check(await this.primary.client.request({method:'PUT',url:'/open-apis/application/v6/applications/'+role.appId+'/management',data:{enable:false}}));
       this.clients.get(role.appId)?.close();this.clients.delete(role.appId);
       this.engine.roles.patch(roleId,{platformStatus:'disabled',disableAttemptedAt:Date.now(),disableRetryAt:null,provisionError:null});
       return {ok:true,status:'disabled'};
     }catch(error){
       const code=error.response?.data?.code??error.code;
-      const permission=Number.isInteger(Number(code))||[401,403].includes(error.response?.status);
+      const permission=code==='app_management_scope_required'||[401,403].includes(Number(error.response?.status??error.status));
       this.engine.roles.patch(roleId,{platformStatus:'disable_pending',disableAttemptedAt:permission?Date.now():null,
         disableRetryAt:permission?null:Date.now()+60000,
-        provisionError:permission?'工作已接回，飞书停用需要应用管理权限。':'工作已接回，飞书连接恢复后会再试停用。'});
+        provisionError:code==='outbox_pending'?'工作已接回；等待这只机器人的消息与附件送达后，再停用飞书入口。':permission?'工作已接回；飞书平台停用尚未完成，可在飞书管理后台停用后登记结果，或为助理确认“启用和停用应用”权限。':'工作已接回；飞书平台停用尚未完成，稍后自动重试。'});
       throw error;
-    }
+    }finally{this.stoppingApps?.delete(role.appId);}
+  }
+  requireDelivered(appId){
+    const pending=this.store.db.prepare('SELECT value FROM outbox WHERE sent=0').all().some(row=>{
+      const {job}=JSON.parse(row.value);return job?.botAppId===appId||(job?.channel==='local'&&this.db.get('subscribers:'+job.id,[]).some(dest=>dest.botAppId===appId));
+    });
+    if(pending||this.db.actions(['pending','running']).some(action=>action.appId===appId)){const error=new AppError(409,'还有已接收的操作、消息或附件尚未处理完成，请等待投递完成后再停用');error.code='outbox_pending';throw error;}
+  }
+  confirmConsoleDisabled(roleId,{appId,confirmed}={}){
+    const role=this.engine.roles.get(roleId);
+    if(!role||role.id==='assistant'||!role.appId||role.appId===this.primaryApp||role.status!=='retired')throw new AppError(409,'先完成独立角色的工作交接');
+    if(appId!==role.appId||confirmed!==true)throw new AppError(409,'请在飞书管理后台核对同一应用已停用，再登记结果');
+    if(this.stoppingApps?.has(role.appId))throw new AppError(409,'这只飞书入口正在停用，请等当前核验结束后登记');
+    this.requireDelivered(role.appId);
+    if(role.platformStatus==='disabled')return {ok:true,status:'disabled'};
+    this.clients.get(role.appId)?.close();this.clients.delete(role.appId);
+    this.engine.roles.patch(roleId,{platformStatus:'disabled_console_confirmed',platformVerifiedVia:'console_confirmation',platformConfirmedAt:Date.now(),disableRetryAt:null,provisionError:null});
+    return {ok:true,status:'disabled_console_confirmed'};
   }
   close(){this.closed=true;clearInterval(this.timer);for(const controller of this.controllers.values())controller.abort();for(const [app,client]of this.clients)if(app!==this.primaryApp)client.close();}
 }

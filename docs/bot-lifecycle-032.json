@@ -1,0 +1,132 @@
+{
+  "date": "2026-11-20",
+  "timezone": "Asia/Hong_Kong",
+  "release": "0.3.2",
+  "data": "explicitly synthetic acceptance material",
+  "applicationCreation": {
+    "method": "actual logged-in Feishu developer console",
+    "newIndependentApplication": true,
+    "botCapabilityAdded": true,
+    "scopeCount": 5,
+    "menuConfiguredInConsole": true,
+    "nativeMenuClickVerified": false
+  },
+  "configuration": {
+    "messagingEvents": "actual V7 config API success",
+    "cardCallbacks": "actual V7 config API success",
+    "publishing": "actual V7 publish API success, console verified version 0.0.2 published",
+    "fullMenuApi": {
+      "code": 210011,
+      "outcome": "minimal bot enable works; menu configured through console"
+    }
+  },
+  "platformShutdown": {
+    "method": "actual logged-in Feishu tenant admin console",
+    "observedStatus": "已停用",
+    "observedAvailability": "被企业管理员停用",
+    "recordType": "explicit console confirmation; not API verification"
+  },
+  "independentTask": {
+    "source": "actual independent application, native Feishu client, actual Codex execution and official message/file APIs",
+    "separateApplication": true,
+    "separateOwnerOpenId": true,
+    "separateNativeConversation": true,
+    "taskOwnedByIndependentRole": true,
+    "businessStatus": "delivered",
+    "actualIncomingRequestReadBack": true,
+    "independentCallbackVerified": true,
+    "actualFileMessages": 1,
+    "files": [
+      {
+        "bytes": 361,
+        "sha256": "df7470a88429bc934137382e49bc4070b75e9b40c472c0ddc10a240f2088f9c5",
+        "matchesSavedSnapshot": true,
+        "has399": true,
+        "hasMarker": true
+      }
+    ]
+  },
+  "handoff": {
+    "actualRoleStatus": "retired",
+    "taskOwnedByAssistant": true,
+    "sameTaskId": true,
+    "oldArtifactsPreserved": true,
+    "replyUsesMainApp": true,
+    "replyUsesMainOwner": true,
+    "replyCreatesNewMessage": true,
+    "oldChatAndMessageIdsRemoved": true,
+    "oldOriginAudited": true,
+    "syntheticMemoryMerged": true,
+    "pendingOldBotMessages": 0,
+    "platformStatus": "disabled_console_confirmed",
+    "oldClientConnected": false,
+    "mainClientConnected": true
+  },
+  "continuedAfterPlatformStop": {
+    "source": "actual web continuation after platform shutdown, actual Codex and primary Feishu app file download",
+    "taskStillSame": true,
+    "taskOwnedByAssistant": true,
+    "originalSessionPreserved": true,
+    "newAssistantSession": true,
+    "actualMainFiles": 1,
+    "files": [
+      {
+        "bytes": 408,
+        "sha256": "dbba46718da5b69da60722749297d10c3e05ea0715262d0c9c3561b1be152fe3",
+        "matchesSavedSnapshot": true,
+        "has399": true,
+        "hasOriginalMarker": true,
+        "hasMainContinuationMarker": true
+      }
+    ],
+    "pendingTaskDeliveries": 0,
+    "oldAppStatus": "disabled_console_confirmed",
+    "oldClientConnected": false,
+    "mainClientConnected": true
+  },
+  "primaryManagementPermissions": {
+    "readOnly": true,
+    "source": "actual primary bot tenant scope API",
+    "scopes": [
+      {
+        "name": "admin:app.enable:write",
+        "present": false,
+        "grantStatus": null
+      },
+      {
+        "name": "application:application:patch",
+        "present": true,
+        "grantStatus": 1
+      },
+      {
+        "name": "admin:app.info:readonly",
+        "present": false,
+        "grantStatus": null
+      },
+      {
+        "name": "application:application:self_manage",
+        "present": true,
+        "grantStatus": 1
+      },
+      {
+        "name": "application:application:readonly",
+        "present": false,
+        "grantStatus": null
+      }
+    ]
+  },
+  "notVerified": [
+    "successful real management PUT: current primary app lacks the required tenant admin grant",
+    "fully automatic first-time SDK registration through owner confirmation to working published bot",
+    "native Feishu menu click for the new bot",
+    "physical Android device; APK unchanged from 0.2.0"
+  ],
+  "cleanup": {
+    "syntheticMemoryDisabled": true,
+    "taskCompleted": true,
+    "taskArchived": true,
+    "retired": true,
+    "consoleDisabled": true,
+    "oldClientDisconnected": true
+  }
+}

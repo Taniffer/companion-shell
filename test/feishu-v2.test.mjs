@@ -26,6 +26,204 @@ test('binding a bot owner cannot erase an earlier menu or publishing failure',as
 
 test('a creation-source restriction is recorded once and prevents repeating unsupported V7 requests',async t=>{const f=setup(t);let calls=0;f.feishu.client.request=async()=>{calls++;return {code:210021,msg:'not created via developer platform'};};await assert.rejects(()=>f.runtime.configure(f.feishu,'assistant'));assert.equal(f.engine.roles.get('assistant').configurationStatus,'requires_console');await assert.rejects(()=>f.runtime.configure(f.feishu,'assistant'),/开发者后台/);assert.equal(calls,1);});
 
+test('real provision completion rejects an app already assigned to another role before saving credentials or configuring it',async t=>{
+  const f=setup(t);
+  f.engine.roles.patch('product',{status:'active',registrationStartedAt:Date.now()});
+  f.engine.roles.patch('quant',{status:'active',appId:'cli_alreadyowned'});
+  let credentials=0,configurations=0;
+  f.runtime.vault.put=()=>{credentials++;return 'unused';};
+  f.runtime.configure=async()=>{configurations++;};
+  const originalPrimary={...f.engine.roles.get('assistant')};
+  for(const appId of [f.runtime.primaryApp,'cli_alreadyowned']){
+    f.runtime.registerApp=async()=>({client_id:appId,client_secret:'synthetic-secret'});
+    f.runtime.provision('product');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.match(f.engine.roles.get('product').provisionError,/已属于其他角色/);
+    assert.equal(f.engine.roles.get('product').appId,undefined);
+    assert.equal(f.runtime.controllers.size,0);
+  }
+  assert.equal(credentials,0);assert.equal(configurations,0);
+  assert.deepEqual(f.engine.roles.get('assistant'),originalPrimary);
+});
+
+test('provision updates reject a different app and a concurrent role binding',async t=>{
+  const f=setup(t);
+  f.engine.roles.patch('quant',{status:'active',appId:'cli_expected'});
+  let resolveRegistration;
+  f.runtime.registerApp=()=>new Promise(resolve=>{resolveRegistration=resolve;});
+  f.runtime.provision('quant');
+  resolveRegistration({client_id:'cli_different',client_secret:'synthetic-secret'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.engine.roles.get('quant').appId,'cli_expected');
+  assert.match(f.engine.roles.get('quant').provisionError,/开通目标不同/);
+  f.engine.roles.patch('product',{status:'active'});
+  f.runtime.provision('product');
+  f.engine.roles.patch('product',{appId:'cli_boundwhilewaiting'});
+  resolveRegistration({client_id:'cli_newregistration',client_secret:'synthetic-secret'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.engine.roles.get('product').appId,'cli_boundwhilewaiting');
+  assert.match(f.engine.roles.get('product').provisionError,/开通目标不同/);
+});
+
+test('platform retirement preflights the actual management grant without disabling or disconnecting an app when absent',async t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'retired',appId:'cli_quantretired'});
+  let writes=0,closed=false;
+  f.runtime.clients.set('cli_quantretired',{close(){closed=true;}});
+  f.feishu.client.request=async request=>{
+    if(request.method==='GET')return {code:0,data:{scopes:[{scope_name:'application:application:patch',grant_status:1},{scope_name:'admin:app.enable:write',grant_status:1,scope_type:'user'}]}};
+    writes++;return {code:0,data:{}};
+  };
+  await assert.rejects(()=>f.runtime.disableRole('quant'),e=>e.code==='app_management_scope_required');
+  const role=f.engine.roles.get('quant');
+  assert.equal(writes,0);assert.equal(closed,false);
+  assert.equal(role.platformStatus,'disable_pending');assert.ok(role.disableAttemptedAt);
+  assert.match(role.provisionError,/平台停用尚未完成/);
+});
+
+test('numeric temporary platform failures remain retryable and only successful management disconnects the retired app',async t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'retired',appId:'cli_quantretired'});
+  let writes=0,closed=false;
+  f.runtime.clients.set('cli_quantretired',{close(){closed=true;}});
+  f.feishu.client.request=async request=>{
+    if(request.method==='GET')return {code:0,data:{scopes:[{scope_name:'admin:app.enable:write',grant_status:1}]}};
+    assert.equal(request.url,'/open-apis/application/v6/applications/cli_quantretired/management');
+    assert.deepEqual(request.data,{enable:false});
+    writes++;
+    return writes===1?{code:99991400,msg:'synthetic rate limit'}:{code:0,data:{}};
+  };
+  await assert.rejects(()=>f.runtime.disableRole('quant'));
+  const waiting=f.engine.roles.get('quant');
+  assert.equal(waiting.disableAttemptedAt,null);assert.ok(waiting.disableRetryAt>Date.now());assert.equal(closed,false);
+  await f.runtime.disableRole('quant');
+  assert.equal(f.engine.roles.get('quant').platformStatus,'disabled');assert.equal(closed,true);
+  assert.equal(f.runtime.clients.has('cli_test_primary'),true);
+});
+
+test('retirement moves only the former bot owner private reply destination and preserves session and origin audit',async t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'active',appId:'cli_retiring',ownerOpenId:'old-owner'});
+  const cases=[['owned',true,true,'old-owner','cli_retiring'],['group',false,false,'old-owner','cli_retiring'],['foreign-owner',true,true,'other','cli_retiring'],['foreign-app',true,true,'old-owner','cli_other']];
+  for(const [id,personal,originPrivate,user,app]of cases){
+    f.db.putTask({id,title:id,role:'quant',private:personal,status:'idle',threadId:'native-'+id});
+    f.db.set('reply-origin:'+id,{id:'logical-'+id,botAppId:app,user,private:originPrivate,channel:'feishu',sourceMessageId:'old-source',chatId:'old-chat',topicId:'old-topic',progressId:'old-progress',patchMessageId:'old-patch',reactionId:'old-reaction'});
+  }
+  await f.engine.roles.retire('quant');
+  const next=f.db.get('reply-origin:owned');
+  assert.equal(next.botAppId,f.runtime.primaryApp);assert.equal(next.user,'owner');assert.equal(next.id,'logical-owned');assert.equal(next.createNewMessage,true);
+  for(const key of ['sourceMessageId','chatId','topicId','progressId','patchMessageId','reactionId'])assert.ok(next[key]==null,key);
+  assert.equal(f.db.get('retired-reply-origin:quant:owned').chatId,'old-chat');
+  assert.equal(f.db.task('owned').role,'assistant');assert.equal(f.db.session('owned','quant').threadId,'native-owned');
+  for(const [id]of cases.slice(1))assert.equal(f.db.get('reply-origin:'+id).sourceMessageId,'old-source');
+  f.engine.enqueue({taskId:'owned',goal:'continue after retirement',requestId:'new-continuation'});
+  const subscribers=f.db.get('subscribers:companion-'+hash('new-continuation').slice(0,32));
+  assert.equal(subscribers.length,1);assert.equal(subscribers[0].botAppId,f.runtime.primaryApp);assert.equal(subscribers[0].user,'owner');
+});
+
+test('retirement with a private bot destination waits for a bound primary owner without partially moving the task',async t=>{
+  const f=setup(t);f.config.feishu.ownerOpenId=null;f.store.set('owner',null);
+  f.engine.roles.patch('quant',{status:'active',appId:'cli_retiring',ownerOpenId:'old-owner'});
+  f.db.putTask({id:'unbound',role:'quant',private:true,status:'idle'});
+  f.db.set('reply-origin:unbound',{id:'logical',botAppId:'cli_retiring',user:'old-owner',private:true,channel:'feishu'});
+  await assert.rejects(()=>f.engine.roles.retire('quant'),/先绑定助理/);
+  assert.equal(f.db.task('unbound').role,'quant');assert.equal(f.db.get('reply-origin:unbound').botAppId,'cli_retiring');
+});
+
+test('platform stop waits for all unsent old bot deliveries including future retries',async t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'retired',appId:'cli_waiting'});
+  let closed=false;f.runtime.clients.set('cli_waiting',{close(){closed=true;}});
+  f.store.emit('deferred-file',{job:{botAppId:'cli_waiting'},artifact:'synthetic.html',retryAt:Date.now()+300000});
+  assert.equal(f.store.pending().length,0);
+  await assert.rejects(()=>f.runtime.disableRole('quant'),e=>e.code==='outbox_pending');
+  assert.equal(f.requests.length,0);assert.equal(closed,false);
+  assert.throws(()=>f.runtime.confirmConsoleDisabled('quant',{appId:'cli_waiting',confirmed:true}),e=>e.code==='outbox_pending');
+  assert.equal(closed,false);f.store.sent('deferred-file');
+  f.db.set('subscribers:old-local-job',[{botAppId:'cli_waiting',user:'old-owner'}]);
+  f.store.emit('local-before-relay',{job:{id:'old-local-job',channel:'local'},artifact:'synthetic.html',retryAt:Date.now()+300000});
+  await assert.rejects(()=>f.runtime.disableRole('quant'),e=>e.code==='outbox_pending');
+  assert.equal(closed,false);f.store.sent('local-before-relay');
+  assert.equal(f.runtime.confirmConsoleDisabled('quant',{appId:'cli_waiting',confirmed:true}).status,'disabled_console_confirmed');
+  assert.equal(closed,true);
+});
+
+test('console stop attestations require a retired distinct app and explicitly distinguish manual evidence from API confirmation',t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'active',appId:'cli_manual'});
+  assert.throws(()=>f.runtime.confirmConsoleDisabled('assistant',{appId:f.runtime.primaryApp,confirmed:true}),/先完成/);
+  assert.throws(()=>f.runtime.confirmConsoleDisabled('quant',{appId:'cli_manual',confirmed:true}),/先完成/);
+  f.engine.roles.patch('quant',{status:'retired'});
+  assert.throws(()=>f.runtime.confirmConsoleDisabled('quant',{appId:'cli_wrong',confirmed:true}),/同一应用/);
+  assert.throws(()=>f.runtime.confirmConsoleDisabled('quant',{appId:'cli_manual'}),/同一应用/);
+  f.runtime.confirmConsoleDisabled('quant',{appId:'cli_manual',confirmed:true});
+  const role=f.engine.roles.get('quant');assert.equal(role.platformStatus,'disabled_console_confirmed');assert.equal(role.platformVerifiedVia,'console_confirmation');assert.ok(role.platformConfirmedAt);
+  assert.equal(f.runtime.clients.has(f.runtime.primaryApp),true);assert.equal(f.requests.length,0);
+});
+
+test('accepted actions drain before stopping and new retired-bot callbacks or shutdown messages cannot add a late delivery',async t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'retired',appId:'cli_stopping',ownerOpenId:'old-owner'});
+  f.runtime.clients.set('cli_stopping',{botId:'bot-old',close(){}});
+  f.db.putAction({id:'already-accepted',appId:'cli_stopping',status:'running'});
+  await assert.rejects(()=>f.runtime.disableRole('quant'),e=>e.code==='outbox_pending');
+  f.db.putAction({id:'already-accepted',appId:'cli_stopping',status:'done'});
+  let grantScopes,completeStop;
+  f.feishu.client.request=async request=>request.method==='GET'?new Promise(resolve=>{grantScopes=resolve;}):new Promise(resolve=>{completeStop=resolve;});
+  const stopping=f.runtime.disableRole('quant');await new Promise(resolve=>setImmediate(resolve));
+  await assert.rejects(()=>f.runtime.disableRole('quant'),/正在停用/);
+  assert.throws(()=>f.runtime.confirmConsoleDisabled('quant',{appId:'cli_stopping',confirmed:true}),/正在停用/);
+  grantScopes({code:0,data:{scopes:[{scope_name:'admin:app.enable:write',grant_status:1}]}});await new Promise(resolve=>setImmediate(resolve));
+  const before=f.store.db.prepare('SELECT COUNT(*) AS n FROM outbox').get().n;
+  f.runtime.normalize=()=>({id:'late-message',private:true,user:'old-owner',text:'hello'});
+  await f.runtime.receiveRole('quant',{});
+  f.runtime.menu('cli_stopping',{operator:{open_id:'old-owner'},event_key:'list'});
+  assert.equal(f.runtime.callback('cli_stopping',callback('old-card','list',{},'old-owner')).toast.type,'error');
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) AS n FROM outbox').get().n,before);assert.equal(f.db.actions(['pending','running']).length,0);
+  completeStop({code:0,data:{}});await stopping;
+  assert.equal(f.engine.roles.get('quant').platformStatus,'disabled');
+  await f.runtime.receiveRole('quant',{});
+});
+
+test('a connected independent app can be configured directly while retired and conflicting apps cannot',async t=>{
+  const f=setup(t),client={synthetic:true,close(){}};
+  f.engine.roles.patch('quant',{status:'active',appId:'cli_independent'});
+  f.runtime.clients.set('cli_independent',client);
+  f.runtime.connectRole=async()=>{};
+  let calls=0;
+  f.runtime.configure=async(actual,roleId)=>{assert.equal(actual,client);assert.equal(roleId,'quant');calls++;return {submitted:true};};
+  await f.runtime.configureRole('quant');assert.equal(calls,1);
+  f.engine.roles.patch('quant',{status:'retired'});
+  await assert.rejects(()=>f.runtime.configureRole('quant'),/活动角色/);
+  f.engine.roles.patch('product',{status:'active',appId:f.runtime.primaryApp});
+  await assert.rejects(()=>f.runtime.configureRole('product'),e=>e.code==='application_conflict');
+  assert.equal(calls,1);
+});
+
+test('binding replacement credentials clears verification from the previous app even when reconnecting is temporarily unavailable',async t=>{
+  const f=setup(t);
+  f.engine.roles.patch('quant',{status:'active',appId:'cli_oldconnection',configurationStatus:'requires_console',menuStatus:'configured',callbackStatus:'verified',provisionError:'old app error'});
+  f.db.set('feishu-check-role:quant','old-check');f.db.set('feishu-check:old-check',{status:'verified'});
+  f.runtime.vault.put=()=> 'synthetic-ref';
+  f.runtime.connectRole=async()=>{throw new Error('synthetic network outage');};
+  await assert.rejects(()=>f.runtime.bindExisting('quant',{appId:'cli_newconnection',secret:'synthetic-secret'}),/network outage/);
+  const role=f.engine.roles.get('quant');
+  assert.equal(role.appId,'cli_newconnection');assert.equal(role.configurationStatus,'incomplete');
+  assert.equal(role.provisionError,null);assert.equal(role.menuStatus,null);assert.equal(role.callbackStatus,null);
+  assert.equal(f.runtime.checkStatus('quant'),null);assert.equal(role.platformStatus,'binding');
+});
+
+test('menu parameters rejected by the platform do not block messaging configuration or falsely claim menus are ready',async t=>{
+  const f=setup(t);f.engine.roles.patch('quant',{status:'active',appId:'cli_independent'});
+  const calls=[];
+  f.feishu.client.request=async request=>{
+    calls.push(request);
+    return request.data?.bot?.bot_menu_enable?{code:210011,msg:'synthetic invalid menu request'}:{code:0,data:{version_id:'synthetic-version'}};
+  };
+  await f.runtime.configure(f.feishu,'quant');
+  const role=f.engine.roles.get('quant');
+  assert.equal(role.menuStatus,'requires_console');assert.match(role.menuWarning,/未通过平台校验/);
+  assert.equal(role.configurationStatus,'submitted');assert.equal(role.callbackStatus,'configured');
+  assert.ok(calls.some(c=>c.data?.bot&&Object.keys(c.data.bot).length===1));
+  assert.ok(calls.some(c=>c.url.endsWith('/config')));assert.ok(calls.some(c=>c.url.endsWith('/publish')));
+  await f.runtime.configure(f.feishu,'quant');
+  assert.equal(calls.filter(c=>c.data?.bot?.bot_menu_enable).length,1);
+});
+
 test('business completion and ownership changes refresh an existing secretary progress card',async t=>{const f=setup(t),task=f.db.putTask({id:randomUUID(),title:'state synchronization',private:true,status:'delivered'}),messageId=await f.runtime.sendCard({...f.runtime.destination('cli_test_primary'),companionTaskId:task.id},taskCard(task,f.engine.roles),'initial-state-card');await f.engine.setTaskState(task.id,'completed');f.runtime.dirty.set(task.id,Date.now()-1000);await f.runtime.flushDirty();let last=f.requests.at(-1);assert.equal(last.path.message_id,messageId);assert.match(last.data.content,/已完成/);await f.engine.roles.handoff(task.id,'life');f.runtime.dirty.set(task.id,Date.now()-1000);await f.runtime.flushDirty();last=f.requests.at(-1);assert.equal(last.path.message_id,messageId);assert.match(last.data.content,/生活助理/);assert.match(last.data.content,/已完成/);});
 
 test('Feishu staffing approval is bound to the original card and idempotent with the workbench',async t=>{

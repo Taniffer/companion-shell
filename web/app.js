@@ -1,5 +1,5 @@
 const main=document.querySelector('#main'),dialog=document.querySelector('#dialog'),dialogBody=document.querySelector('#dialog-body');
-const state={overview:null,route:'home',id:null,renderedKey:'home:',navigationVersion:0,listResult:null,historyComplete:false,defaultRole:'assistant',showArchived:false,pairCode:'',pairAddress:'',pairExpires:0,searchInputs:{},task:null,captures:[],memories:[],selected:new Set(),query:'',drafts:{},pendingRequests:new Map(),staffingBusy:new Set(),loading:false,polling:false};
+const state={overview:null,route:'home',id:null,renderedKey:'home:',navigationVersion:0,listResult:null,historyComplete:false,defaultRole:'assistant',showArchived:false,pairCode:'',pairAddress:'',pairExpires:0,searchInputs:{},task:null,captures:[],memories:[],selected:new Set(),query:'',drafts:{},pendingRequests:new Map(),staffingBusy:new Set(),roleConnections:new Set(),loading:false,polling:false};
 const labels={waiting_approval:'待桌面确认',waiting_input:'待你补充',queued:'已排队',starting:'正在准备',running:'正在处理',waiting:'专业工作进行中',syncing:'正在取回答复',delivered:'已交付',idle:'可以继续',uncertain:'需要核实投递',failed:'本轮未完成',interrupted:'已中断',paused:'已暂存'};
 const roleNames={assistant:'助理',quant:'量化助理',product:'产品助理',life:'生活助理'};
 const roleDescriptions={assistant:'理解你的偏好，直接处理日常问题，按需要协调专业工作。',quant:'梳理策略、数据和研究证据，把假设与验证结果说清楚。',product:'一起推进软件与产品，从需求到实现、检查和交付。',life:'整理生活资料、出行安排和准备事项，记住相关偏好。'};
@@ -199,10 +199,13 @@ function roleCard(role){
       ${running?button('直接聊','role-chat',true,ref)+button(platformAction,'role-provision',false,ref):''}
       ${running&&role.id!=='assistant'?button('并回助理','role-retire',false,ref):''}
       ${running&&role.paired?button('发送连接测试卡','role-check',false,ref):''}
-      ${role.status==='retired'&&role.platformStatus==='disable_pending'?button('重试飞书停用','role-disable',false,ref):''}
+      ${role.status==='retired'&&role.platformStatus==='disable_pending'?button('重试飞书停用','role-disable',false,ref)+button('登记后台停用结果','role-confirm-disabled',false,ref):''}
     </div>
+    ${running&&role.id!=='assistant'?`<details class="task-controls" data-role-connection="${esc(role.id)}" ${state.roleConnections.has(role.id)?'open':''}><summary>飞书连接设置</summary>${role.appId?button('继续配置这只机器人','role-configure',false,ref)+(!role.paired?button('修正连接信息','role-bind',false,ref):''):button('连接已有机器人','role-bind',false,ref)}</details>`:''}
     ${role.connectionCheck&&running?`<p class="role-status">${role.connectionCheck.status==='verified'?'飞书卡片点击已返回':role.connectionCheck.status==='sent'?'测试卡已发出，等待点击':'正在发送测试卡'}</p>`:''}
     ${role.provisionError?`<p class="notice warn">${esc(role.provisionError)}</p>`:''}
+    ${role.menuWarning&&running?`<p class="notice warn">${esc(role.menuWarning)}</p>`:''}
+    ${role.status==='retired'&&['disabled','disabled_console_confirmed'].includes(role.platformStatus)?`<p class="role-status">${role.platformStatus==='disabled'?'飞书入口已通过接口停用':'飞书入口已在后台确认停用 · 人工核验记录'}</p>`:''}
     ${role.launchLink&&running?`<a class="role-launch" href="${esc(role.launchLink)}" target="_blank" rel="noopener noreferrer">打开飞书会话 ↗</a>`:''}
     </article>`;
 }
@@ -278,8 +281,14 @@ else if(action==='search-continue'){
 }
 else if(action==='role-chat'){const role=node.dataset.role;const recent=(state.overview.tasks??[]).find(t=>t.role===role&&!t.archived);if(recent)location.hash='chat/'+recent.id+'?role='+encodeURIComponent(role);else roleMessageDialog(role);}
 else if(action==='role-provision'){node.disabled=true;try{await api('/api/roles/'+node.dataset.role+'/provision',{method:'POST',data:{}});await loadOverview();render(true);toast('开通流程已准备；按卡片完成飞书确认。');}finally{node.disabled=false;}}
+else if(action==='role-bind'){
+  const role=state.overview.roles.find(r=>r.id===node.dataset.role);
+  openDialog(`<h2>连接 ${esc(role.name)} 的飞书机器人</h2><p class="subtitle">把已创建的独立机器人连接到这个角色。连接信息仅保存在本机。</p><form id="role-bind-form" data-role="${esc(role.id)}" class="form-stack"><label>应用编号（App ID）<input name="appId" value="${esc(role.appId??'')}" required pattern="cli_[a-zA-Z0-9]+" autocomplete="off"></label><label>应用密钥（App Secret）<input name="secret" type="password" required autocomplete="new-password"></label><div class="actions end">${button('取消','close-dialog')}<button type="submit" class="primary">连接机器人</button></div></form>`);
+}
+else if(action==='role-configure'){node.disabled=true;try{await api('/api/roles/'+node.dataset.role+'/configure',{method:'POST',data:{}});await loadOverview();render(true);toast('配置已提交；发布状态及收发结果仍需核验。');}finally{node.disabled=false;}}
 else if(action==='role-check'){await api('/api/roles/'+node.dataset.role+'/check',{method:'POST',data:{}});await loadOverview();render(true);toast('已安排发送；请到飞书点一下测试卡。');}
 else if(action==='role-disable'){await api('/api/roles/'+node.dataset.role+'/disable',{method:'POST',data:{}});await loadOverview();render(true);toast('平台状态已核验。');}
+else if(action==='role-confirm-disabled'){const role=state.overview.roles.find(r=>r.id===node.dataset.role);openDialog(`<form id="role-disabled-form" data-role="${esc(role.id)}"><h2>登记后台停用结果</h2><p>先在<a href="https://www.feishu.cn/admin" target="_blank" rel="noopener noreferrer">飞书管理后台</a>停用“${esc(role.name)}”，并核对应用编号 <code>${esc(role.appId)}</code>。</p><p class="subtitle">这里记录你的后台核验结果，不代表接口已经验证。原任务与资料保留。</p><input type="hidden" name="appId" value="${esc(role.appId)}"><label><input type="checkbox" name="confirmed" required> 我已核对这只应用在飞书后台显示已停用</label><div class="actions end spaced">${button('取消','close-dialog')}<button type="submit" class="primary">记录停用结果</button></div></form>`);}
 else if(action==='role-retire'){
   const version=state.navigationVersion;
   const plan=await api('/api/roles/'+node.dataset.role+'/retirement');
@@ -305,8 +314,18 @@ else if(action==='complete-task'||action==='reopen-task'){
 else if(action==='task-secretary'){node.disabled=true;try{const taskId=state.id,version=state.navigationVersion;const result=await api('/api/tasks/'+taskId+'/messages',{method:'POST',data:{role:'assistant',goal:'请根据这项任务已有结果、资料和限制，简短汇总当前进展、待定事项和建议下一步；不要重复执行专业工作。',requestId:crypto.randomUUID()}});await loadOverview();if(version===state.navigationVersion&&!dialog.open)location.hash='chat/'+result.task.id+'?role=assistant';}finally{node.disabled=false;}}
 else if(action==='assign-task'){const roleOptions=state.overview.roles.filter(r=>!['retired','available'].includes(r.status)).map(r=>`<option value="${r.id}" ${r.id===state.task.role?'selected':''}>${esc(r.name)}</option>`).join('');openDialog(`<h2>交给谁继续</h2><p class="subtitle">交接任务要求、相关资料与摘要，保留同一任务编号。正在执行时会先核实原会话。</p><form id="assign-form" data-task="${state.id}" data-version="${state.task.actionVersion??1}" class="form-stack"><select name="roleId">${roleOptions}</select><div class="actions end">${button('取消','close-dialog')}<button class="primary" type="submit">交接任务</button></div></form>`);}
 }catch(error){toast(error.message);}});
-document.addEventListener('submit',async event=>{const form=event.target;if(!['board-search','role-message-form','retire-form','assign-form'].includes(form.id))return;event.preventDefault();const submit=form.querySelector('[type=submit]');if(submit?.disabled)return;if(submit)submit.disabled=true;try{const data=Object.fromEntries(new FormData(form));
+document.addEventListener('toggle',event=>{const target=event.target;if(!target.matches?.('details[data-role-connection]'))return;const id=target.dataset.roleConnection;if(target.open)state.roleConnections.add(id);else state.roleConnections.delete(id);},true);
+dialog.addEventListener('close',()=>dialog.querySelector('#role-bind-form')?.reset());
+document.addEventListener('submit',async event=>{const form=event.target;if(!['board-search','role-message-form','retire-form','assign-form','role-bind-form','role-disabled-form'].includes(form.id))return;event.preventDefault();const submit=form.querySelector('[type=submit]');if(submit?.disabled)return;if(submit)submit.disabled=true;try{const data=Object.fromEntries(new FormData(form));
+if(form.id==='role-disabled-form'){await api('/api/roles/'+form.dataset.role+'/confirm-disabled',{method:'POST',data:{appId:data.appId,confirmed:data.confirmed==='on'}});if(dialog.contains(form)&&dialog.open)dialog.close();await loadOverview();render(true);toast('已保存后台核验记录。');return;}
 if(form.id==='board-search'){state.boardQuery=(data.q??'').trim();state.searchDraft=null;state.searchDesktop=false;if(await loadBoard())render(true);}
+else if(form.id==='role-bind-form'){
+  await api('/api/roles/'+form.dataset.role+'/bind',{method:'POST',data});
+  const current=dialog.contains(form)&&dialog.open;
+  form.reset();if(current)dialog.close();
+  await loadOverview();if(current)render(true);
+  toast('已连接独立机器人，按角色卡片完成用户绑定。');
+}
 else if(form.id==='role-message-form'){
   const originVersion=state.navigationVersion;
   const endpoint=form.dataset.task?'/api/tasks/'+form.dataset.task+'/messages':'/api/tasks';

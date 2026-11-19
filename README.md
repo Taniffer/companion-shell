@@ -2,7 +2,7 @@
 
 给 Codex Desktop 一个贴近生活的壳：飞书上交代事情，电脑上看任务进展，手机上随手记。默认一位助理。日常分工由助理处理，增减长期人员由你确认一次。
 
-MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.3.1**，以 Windows + Codex Desktop 为主机。
+MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.3.2**，以 Windows + Codex Desktop 为主机。
 
 ![任务看板，隔离验收数据](docs/images/board-v3.png)
 
@@ -19,13 +19,13 @@ MIT 开源，本机运行，无需租用服务器。当前版本 **MVP 0.3.1**�
 
 ## 下载
 
-- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.3.1/companion-mvp-0.3.1-windows.zip)
-- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.3.1/companion-capture-0.2.0.apk)
-- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.3.1)
+- [Windows 接入包](https://github.com/Taniffer/companion-shell/releases/download/v0.3.2/companion-mvp-0.3.2-windows.zip)
+- [Android APK](https://github.com/Taniffer/companion-shell/releases/download/v0.3.2/companion-capture-0.2.0.apk)
+- [源码与校验值](https://github.com/Taniffer/companion-shell/releases/tag/v0.3.2)
 
 Android 轻记录入口使用 0.2.0 安装包。
 
-本次为预览版。已通过既有飞书机器人的真实消息、卡片点击、任务续聊与文件回传；独立机器人开通、发布和停用仍受账号及平台权限约束。[0.3.1 用户视角验收报告](docs/0.3.1用户验收报告.md) 区分真实链路、组件测试和未验证项。
+本次为预览版。已真实验证独立飞书应用的后台创建、发布、绑定、卡片点击、任务交付、并回助理与平台停用，以及停用后由主助理继续原任务并回传文件。创建和停用采用已登录后台；配置与发布使用真实接口，菜单采用后台配置。完整一键开通及接口自动停用仍受应用来源与权限约束。[0.3.2 用户视角补测报告](docs/0.3.2用户验收报告.md) 逐项区分真实验证与替身回归；[上一版完整日常链路](docs/0.3.1用户验收报告.md) 保留。
 
 ## 在 Windows 使用
 

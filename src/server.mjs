@@ -117,14 +117,16 @@ export async function startServer({engine,db,root,dataDir,uiPort=47471,mobilePor
         const proposalMatch=path.match(/^\/api\/role-proposals\/([a-z0-9-]+)\/(approve|dismiss)$/);
         if(proposalMatch&&req.method==='POST'){send(res,{proposal:engine.roles.decide(proposalMatch[1],proposalMatch[2])});return;}
         const qrRole=path.match(/^\/api\/roles\/([a-z][a-z0-9-]+)\/qr$/);if(qrRole&&req.method==='GET'){if(!engine.feishuRuntime)throw new AppError(503,'开通入口尚未准备');const png=await engine.feishuRuntime.qr(qrRole[1]);res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(png);return;}
-        const roleMatch=path.match(/^\/api\/roles\/([a-z][a-z0-9-]+)(?:\/(retirement|retire|provision|bind|disable|check))?$/);
+        const roleMatch=path.match(/^\/api\/roles\/([a-z][a-z0-9-]+)(?:\/(retirement|retire|provision|bind|disable|check|configure|confirm-disabled))?$/);
         if(roleMatch){const id=roleMatch[1],action=roleMatch[2];
           if(req.method==='POST'&&action==='check'){if(!engine.feishuRuntime)throw new AppError(503,'飞书连接尚未准备');send(res,engine.feishuRuntime.checkConnection(id),202);return;}
           if(req.method==='GET'&&action==='retirement'){const plan=engine.roles.retirement(id);const {pairing,...safeRole}=plan.role;send(res,{...plan,role:safeRole});return;}
           if(req.method==='POST'&&action==='retire'){const proposal=engine.roles.confirmRetirement(id,await body(req,10000));send(res,{proposal,role:engine.roles.get(id)},202);return;}
           if(req.method==='POST'&&action==='provision'){if(!engine.feishuRuntime)throw new AppError(503,'飞书开通入口尚未准备好');send(res,engine.feishuRuntime.provision(id),202);return;}
           if(req.method==='POST'&&action==='bind'){if(!engine.feishuRuntime)throw new AppError(503,'飞书入口尚未准备好');send(res,await engine.feishuRuntime.bindExisting(id,await body(req,10000)));return;}
+          if(req.method==='POST'&&action==='configure'){if(!engine.feishuRuntime)throw new AppError(503,'飞书入口尚未准备好');send(res,await engine.feishuRuntime.configureRole(id));return;}
           if(req.method==='POST'&&action==='disable'){if(!engine.feishuRuntime)throw new AppError(503,'飞书入口尚未准备好');send(res,await engine.feishuRuntime.disableRole(id));return;}
+          if(req.method==='POST'&&action==='confirm-disabled'){if(!engine.feishuRuntime)throw new AppError(503,'飞书入口尚未准备好');send(res,engine.feishuRuntime.confirmConsoleDisabled(id,await body(req,10000)));return;}
         }
         if(req.method==='GET'&&path==='/api/tasks'){try{await engine.importThreads();}catch{}send(res,db.listTasks({query:(url.searchParams.get('q')??'').slice(0,300),offset:Math.max(0,parseInt(url.searchParams.get('offset')??'0',10)||0),limit:60,archived:url.searchParams.get('archived')==='1',conversations:url.searchParams.get('chats')==='1'}));return;}
         if(req.method==='POST'&&path==='/api/history'){send(res,await engine.importHistory());return;}
